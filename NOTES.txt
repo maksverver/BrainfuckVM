@@ -1,0 +1,8 @@
+- speed comparison on welcome.bf:
+    naive interpreter:               10m 5s     (interpreter; gcc -O2)
+    bytecode interpreter:             2m 9s     (interpreter2; gcc -O2)
+    compile to C then to native:        35.5s   (bf2c; gcc -O3)
+    JIT VM (without optimization):      35.2s   (bfi)
+    JIT VM (with optimization):          1.2s   (bfi -O)
+
+N.B. even with optimization disabled, the JIT VM does peephole optimizations.

@@ -1,0 +1,16 @@
+An all-purpose Brainfuck VM.
+
+Main features:
+ - A clear execution model, fully enforced by the runtime environment.
+ - High performance by using a just-in-time compiler to generate native code
+   rather than interpret the Brainfuck code directly.
+
+Detailed features:
+ - Checks input for validity (i.e. detects unmatched brackets) when parsing.
+ - By default detects all head-out-of-bounds errors at runtime.
+ - Dynamically allocates memory as needed, so small and large programs alike
+   can be executed quickly and efficiently without requiring tuning by the user.
+ - Fast just-in-time compilation provides efficient execution of Brainfuck code.
+ - Optimal optimization pass removes redundant operations and increases the
+   efficiency of generated code. Although this optimization pass removes some
+   bounds checks, out-of-bounds reads and writes are still detected.

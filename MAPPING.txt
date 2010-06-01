@@ -1,0 +1,66 @@
+Bytecode mapping for x86
+------------------------
+
+Callback functions take 
+
+The Brainfuck program is a function with prototype:
+
+    char *bfmain(char *head, char *(callbacks[3])(char *));
+
+This function takes the starting position of the tape head as an argument and
+returns the final position of the tape head.
+
+Every callback takes the current tape head as an argument and returns a new
+tape head value. (In practice, none of the callbacks move the tape head.)
+
+Inside the function, the EAX/RAX register is used to store the tape head. The
+callbacks pointer is stored in EBX/RBX (since this register is preserved over
+function calls). CL is used to temporary store cell values.
+
+Bounds checking is done only implicitly, by surrounding the allocated tape
+memory with inaccessible pages which will trigger a page fault when read or
+written. To  ensure memory errors are detected, the code generator ensures the
+tape is accessed at positions of at most a pagesize apart. (For example, if the
+tape head has to move two pagesizes to the right, the code generator will
+generate an extra instruction to read a byte after one pagesize, to trigger a
+page fault if the movement would exceed the tape memory.) Therefore, page faults
+are guaranteed to occur in one of the two pages at the ends of the array.
+
+Function prologue:
+
+    pushq   %rbx            # 53
+    movq    %rdi, %rax      # 48 89 f8
+    movq    %rsi, %rbx      # 48 89 f3
+
+Function epilogue:
+
+    test    $0, (%rax)      # f6 00 00     force page fault when out-of-bounds
+    popq    %rbx            # 5b
+    ret                     # c3
+
+Loop code: (parts of which can be optimized away by the peephole optimizer)
+
+    cmpb $0, (%rax)         # 80 38 00
+    jz b                    # 74 xx             if offset < 128
+                            # 0f 84 xx xx xx xx otherwise
+a:
+    # .. code inside loop goes here ..
+
+    cmpb $0, (%rax)         # 80 38 00
+    jnz a                   # 75 xx             if offset > -129
+                            # 0f 85 xx xx xx xx otherwise
+b:
+
+ADD<value> opcode:
+    addb $<value>, (%rax)   # 80 00 xx
+
+MOVE<dist> opcode:
+    addq $<dist>, %rax      # 48 83 c0 xx       if -128 <= dist< 128
+                            # 48 05 xx xx xx xx otherwise
+
+CALL<func> opcode:
+    movq  %rax, %rdi        # 48 89 c7
+    call  <offset>(%rbx)    # ff 13             if func == 0
+                            # ff 53 xx          otherwise
+
+NOTE: this document is incomplete.
