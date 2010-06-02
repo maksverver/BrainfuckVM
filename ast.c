@@ -1,6 +1,7 @@
 #include "ast.h"
 #include <assert.h>
 #include <stdlib.h>
+#include <stddef.h>
 #include <string.h>
 
 AstNode *ast_clone(AstNode *node)
@@ -13,7 +14,7 @@ AstNode *ast_clone(AstNode *node)
     assert(node->type > OP_NONE && node->type < OP_ADD_MOVE);
 
     /* Allocate memory: */
-    copy = malloc(sizeof(struct AstNode));
+    copy = malloc(offsetof(AstNode, begin));
     assert(copy != NULL);
 
     /* Clone/copy fields: */
@@ -31,7 +32,6 @@ void ast_free(AstNode *node)
     {
         AstNode *next = node->next;
         ast_free(node->child);
-        if (node->type == OP_ADD_MOVE) free(((AddMoveNode*)node)->add);
         free(node);
         node = next;
     }

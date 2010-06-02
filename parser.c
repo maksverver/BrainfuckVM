@@ -57,7 +57,7 @@ static void emit(struct AstNode *temp, struct AstNode ***end, int new_type)
 static AstNode *parse(ParseState *ps)
 {
     struct AstNode *begin = NULL, **end = &begin;
-    struct AstNode node = { NULL, NULL, OP_NONE, 0 };
+    struct AstNode node = { NULL, NULL, OP_NONE, 0, 0, 0, NULL };
     int c;
 
     for (;;)

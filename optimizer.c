@@ -1,5 +1,6 @@
 #include "optimizer.h"
 #include <assert.h>
+#include <string.h>
 #include <stdlib.h>
 
 static void drop(AstNode **p)
@@ -72,44 +73,49 @@ static void pass2(AstNode **p)
 }
 
 /* Collapse the given sequence of move/add nodes into a single AddMoveNode: */
-static AddMoveNode *pass3_collapse(AstNode *p)
+static AstNode *pass3_collapse(AstNode *p)
 {
-    AstNode *n;
-    AddMoveNode *node;
-    int pos;
-
-    /* Initialize complex node structure: */
-    node = malloc(sizeof(AddMoveNode));
-    assert(node != NULL);
-    node->base.next  = NULL;
-    node->base.child = NULL;
-    node->base.type  = OP_ADD_MOVE;
-    node->base.value = 0;
-    node->offset = 0;
-    node->begin  = 0;
-    node->end    = 1;
+    AstNode *n, *node;
+    int begin, end, pos;
 
     /* Determine bounds: */
-    pos = 0;
+    begin = 0, end = 1, pos = 0;
     for (n = p; n != NULL; n = n->next)
     {
         if (n->type != OP_MOVE) continue;
         pos += n->value;
-        if (pos >= node->end) node->end = pos + 1;
-        else if (pos < node->begin) node->begin = pos;
+        if (pos >= end) end = pos + 1;
+        else if (pos < begin) begin = pos;
     }
-    node->offset = pos;
 
-    /* Allocate added values within bounds: */
-    node->add = calloc(node->end - node->begin, sizeof(char));
+    /* Initialize complex node structure: */
+    node = malloc(sizeof(AstNode) + (end - begin));
+    assert(node != NULL);
+    node->next  = NULL;
+    node->child = NULL;
+    node->type  = OP_ADD_MOVE;
+    node->value = pos;
+    node->begin = begin;
+    node->end   = end;
+    node->add   = (signed char*)node + sizeof(AstNode);
+    memset(node->add, 0, end - begin);
+    node->add -= begin;
 
     /* Determine added values: */
-    pos = -node->begin;
+    pos = 0;
     for (n = p; n != NULL; n = n->next)
     {
         if (n->type == OP_MOVE) pos += n->value;
         else node->add[pos] += n->value;
     }
+
+    /* Compress range [begin:end) as far as possible, but ensure all non-zero
+       entries are kept in range, as well as the start and end head position: */
+    while (node->begin < 0 && node->begin < node->value &&
+           node->add[node->begin] == 0) ++node->begin;
+    while (node->end > 1 && node->end - 1 > node->value &&
+           node->add[node->end - 1] == 0) --node->end;
+
     return node;
 }
 

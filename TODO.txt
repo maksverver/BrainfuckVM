@@ -1,5 +1,3 @@
- - merge AstNode and AddMoveNode
-
  - create test cases that cover all the possible optimizations and code
    generation scenario's.
 

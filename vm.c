@@ -293,23 +293,23 @@ static void gen_loop_code(AstNode *node)
    value of the tape head is decremented or incremented by one every iteration.
    In this case, we can eliminate the loop entirely and generate static code
    that adds a constant multiple of the current cell to the affected cells. */
-static int gen_special_loop_code(AddMoveNode *child)
+static int gen_special_loop_code(AstNode *child)
 {
-    int pos, step = child->add[-child->begin], num_bits = 0;
+    int pos, num_bits = 0;
 
-    if ( child->base.next != NULL ||     /* must have a single child node */
-         child->offset != 0 ||           /* must not move the tape head */
-         (step != 1 && step != -1))       /* must change by one each time */
-    {
-        return 0;
-    }
+    if (child == NULL || child->next != NULL ||   /* must be a single node */
+        child->type != OP_ADD_MOVE ||             /* must be Add+Move node */
+        child->value != 0) return 0;        /* must not move the tape head */
+
+    /* Verify current cell changes by exactly 1 every step: */
+    if (child->add[0] != -1 && child->add[0] != 1) return 0;
 
     /* Figure out maximum number of bits to be used: */
     for (pos = child->begin; pos < child->end; ++pos)
     {
         if (pos != 0)
         {
-            int v = child->add[pos - child->begin], i = 0;
+            int v = child->add[pos], i = 0;
             if (v < 0) v = -v;
             while (v != 0) ++i, v >>= 1;
             if (i > num_bits) num_bits = i;
@@ -334,7 +334,7 @@ static int gen_special_loop_code(AddMoveNode *child)
             {
                 if (pos != 0)
                 {
-                    int v = child->add[pos - child->begin] / -step;
+                    int v = child->add[pos] / -child->add[0];
                     if (v >= 0 && (v & (1 << bit)))
                     {
                         if (pos >= -128 && pos < 128)
@@ -391,12 +391,7 @@ static void gen_code(AstNode *node)
         switch (node->type)
         {
         case OP_LOOP:
-            if (node->child != NULL && node->child->type == OP_ADD_MOVE &&
-                gen_special_loop_code((AddMoveNode*)node->child))
-            {
-                /* we're done. */
-            }
-            else
+            if (!gen_special_loop_code(node->child))
             {
                 gen_loop_code(node);
             }
@@ -449,46 +444,45 @@ static void gen_code(AstNode *node)
 
         case OP_ADD_MOVE:
             {
-                AddMoveNode *man = (AddMoveNode*)node;
-                int n, add, pos;
+                int pos;
 
                 /* FIXME: should try to trigger page faults on page boundaries
-                          if bounds exceed pagesize but move to man->offset
+                          if bounds exceed pagesize but move to node->offset
                           doesn't cover it*/
-                assert(man->begin >= -pagesize && man->end - 1 <= pagesize);
+                assert(node->begin >= -pagesize && node->end - 1 <= pagesize);
 
-                gen_move(man->offset);
-
-                for (n = 0; n < man->end - man->begin; ++n)
+                for (pos = node->begin; pos < node->end; ++pos)
                 {
-                    if ((add = man->add[n]) != 0)
-                    {
-                        pos = man->begin + n - man->offset;
-                        if (pos == 0)
-                        {
-                            /* defer */
-                        }
-                        else
-                        if (pos >= -128 && pos < 128)
-                        {   /* addb $<value>, <pos>(%rax) */
-                            const char text[4] = { 0x80, 0x40, pos, add };
-                            cb_append(&code, text, sizeof(text));
-                        }
-                        else
-                        {   /* addb $<value>, <pos>(%rax) */
-                            const char text[7] = { 0x80, 0x80,
-                                pos, pos >> 8, pos >> 16, pos >> 24, add };
-                            cb_append(&code, text, sizeof(text));
-                        }
+                    if (pos == node->value || node->add[pos] == 0) continue;
+                    if (pos == 0)
+                    {   /* addb $<value>, (%rax) */
+                        const char text[3] = { 0x80, 0x00, node->add[pos] };
+                        cb_append(&code, text, sizeof(text));
+                    }
+                    else
+                    if (pos >= -128 && pos < 128)
+                    {   /* addb $<value>, <pos>(%rax) */
+                        const char text[4] = { 0x80, 0x40,
+                            pos, node->add[pos] };
+                        cb_append(&code, text, sizeof(text));
+                    }
+                    else
+                    {   /* addb $<value>, <pos>(%rax) */
+                        const char text[7] = { 0x80, 0x80,
+                            pos, pos >> 8, pos >> 16, pos >> 24,
+                            node->add[pos] };
+                        cb_append(&code, text, sizeof(text));
                     }
                 }
 
+                gen_move(node->value);
+
                 /* Do addition to current head position last, so we benefit
                    from having an up-to-date zero flag: */
-                if ((add = man->add[man->offset - man->begin]))
+                if (node->add[node->value] != 0)
                 {
                     /* addb $<value>, (%rax) */
-                    const char text[3] = { 0x80, 0x00, add };
+                    const char text[3] = { 0x80, 0x00, node->add[node->value] };
                     cb_append(&code, text, sizeof(text));
                     zf_valid = 1;
                 }
@@ -497,8 +491,16 @@ static void gen_code(AstNode *node)
                     zf_valid = 0;
                 }
 
-                if (man->offset != 0) cell_value = -1;
-                else if (add != 0) cell_value = (cell_value == 0) ? 1 : -1;
+                if (node->value != 0)
+                {
+                    cell_value = -1;  /* head moved */
+                }
+                else
+                if (node->add[node->value] != 0) 
+                {
+                    cell_value = (cell_value == 0) ? 1 : -1;  /* cell changed */
+                }  /* else: head and cell value unchanged */
+
             } break;
 
         default:

@@ -60,28 +60,27 @@ static void print_ast(AstNode *node, PrintContext *pc)
     case OP_ADD_MOVE:
         {
             int pos;
-            AddMoveNode *man = (AddMoveNode*)node;
-            if (man->offset < 0)
+            if (node->value < 0)
             {
-                print_move(man->end - 1, pc);
-                for (pos = man->end - 1; pos > man->begin; --pos)
+                print_move(node->end - 1, pc);
+                for (pos = node->end - 1; pos > node->begin; --pos)
                 {
-                    print_add(man->add[pos - man->begin], pc);
+                    print_add(node->add[pos], pc);
                     print_move(-1, pc);
                 }
-                print_add(man->add[pos - man->begin], pc);
-                print_move(man->offset - pos, pc);
+                print_add(node->add[pos], pc);
+                print_move(node->value - pos, pc);
             }
-            else  /* man->offset >= 0 */
+            else  /* node->value >= 0 */
             {
-                print_move(man->begin, pc);
-                for (pos = man->begin; pos < man->end - 1; ++pos)
+                print_move(node->begin, pc);
+                for (pos = node->begin; pos < node->end - 1; ++pos)
                 {
-                    print_add(man->add[pos - man->begin], pc);
+                    print_add(node->add[pos], pc);
                     print_move(1, pc);
                 }
-                print_add(man->add[pos - man->begin], pc);
-                print_move(man->offset - pos, pc);
+                print_add(node->add[pos], pc);
+                print_move(node->value - pos, pc);
             }
         } break;
 
