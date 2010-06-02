@@ -9,13 +9,15 @@
 #include <stdio.h>
 #include <getopt.h>
 
-static const char   *arg_path       = "-";
-static const char   *arg_code       = NULL;
-static int          arg_optimize    = 0;
-static int          arg_debug       = -1;
-static int          arg_print       = 0;
-static const char   *arg_object     = NULL;
-static size_t       arg_mem_limit   = (size_t)-1;
+static const char   *arg_source_path = "-";
+static const char   *arg_source      = NULL;
+static const char   *arg_input_path  = NULL;
+static const char   *arg_output_path = NULL;
+static int          arg_optimize     = 0;
+static int          arg_debug        = -1;
+static int          arg_print        = 0;
+static const char   *arg_object      = NULL;
+static size_t       arg_mem_limit    = (size_t)-1;
 
 static void exit_usage(void)
 {
@@ -23,11 +25,13 @@ static void exit_usage(void)
         "\tbfi <options> [<source.bf>]\n\n"
         "Options:\n"
         "\t-O        optimize\n"
+        "\t-c <path> dump compiled object to <path>\n"
         "\t-d <char> debug callback character\n"
         "\t-e <code> use code in argument (don't read from file)\n"
+        "\t-i <path> read input from file at <path> instead of standard input\n"
         "\t-m <size> tape memory limit (K, M or G suffix recognized)\n"
-        "\t-p        print compact code (don't execute)\n"
-        "\t-o <path> dump compiled object to <path>\n");
+        "\t-o <path> write output to file at <path> instead of standard output\n"
+        "\t-p        print compact code (don't execute)\n" );
     exit(0);
 }
 
@@ -48,7 +52,7 @@ static size_t parse_size(const char *arg)
 static void parse_args(int argc, char *argv[])
 {
     int c;
-    while ((c = getopt(argc, argv, "Od::e:m:o:p")) >= 0)
+    while ((c = getopt(argc, argv, "Oc:d::e:i:m:o:p")) >= 0)
     {
         switch (c)
         {
@@ -56,12 +60,20 @@ static void parse_args(int argc, char *argv[])
             arg_optimize = 1;
             break;
 
+        case 'c':
+            arg_object = optarg;
+            break;
+
         case 'd':
             arg_debug = optarg ? optarg[0] : '!';
             break;
 
         case 'e':
-            arg_code = optarg;
+            arg_source = optarg;
+            break;
+
+        case 'i':
+            arg_input_path = optarg;
             break;
 
         case 'm':
@@ -69,21 +81,25 @@ static void parse_args(int argc, char *argv[])
             break;
 
         case 'o':
-            arg_object = optarg;
+            arg_output_path = optarg;
             break;
 
         case 'p':
             arg_print = 1;
             break;
 
-        default:
-            fprintf(stderr, "Invalid option: `%c'\n\n", (char)optopt);
+        case '?':
+            /* getopt has already printed an error message */
+            putc('\n', stderr);
             exit_usage();
+
+        default:
+            assert(0);  /* unhandled option. should not happen! */
         }
     }
     if (optind < argc)
     {
-        arg_path = argv[optind++];
+        arg_source_path = argv[optind++];
     }
     if (optind < argc)
     {
@@ -102,9 +118,19 @@ int main(int argc, char *argv[])
     parse_args(argc, argv);
 
     /* Parse input program: */
-    if (arg_code != NULL) pr = parse_string(arg_code, arg_debug);
-    else if (strcmp(arg_path, "-") != 0) pr = parse_path(arg_path, arg_debug);
-    else pr = parse_file(stdin, arg_debug);
+    if (arg_source != NULL)
+    {
+        pr = parse_string(arg_source, arg_debug);
+    }
+    else
+    if (strcmp(arg_source_path, "-") != 0)
+    {
+        pr = parse_path(arg_source_path, arg_debug);
+    }
+    else
+    {
+        pr = parse_file(stdin, arg_debug);
+    }
 
     /* Display warnings/errors: */
     for (msg = pr->warnings; msg != NULL; msg = msg->next)
@@ -146,8 +172,31 @@ int main(int argc, char *argv[])
         ast_free(ast);
         if (arg_object == NULL)
         {
-            if (arg_mem_limit != (size_t)-1) vm_limit_mem(arg_mem_limit);
-            vm_exec();
+            FILE *fp_input = stdin, *fp_output = stdout;
+
+            if (arg_mem_limit != (size_t)-1) vm_set_memlimit(arg_mem_limit);
+
+            if (arg_input_path != NULL &&
+                (fp_input = fopen(arg_input_path, "r")) == NULL)
+            {
+                fprintf(stderr, "Could not open input file `%s' "
+                                "for reading!\n", arg_input_path);
+            }
+            else
+            if (arg_output_path != NULL &&
+                (fp_output = fopen(arg_output_path, "w")) == NULL)
+            {
+                fprintf(stderr, "Could not open output file `%s' "
+                                "for writing!\n", arg_input_path);
+            }
+            else
+            {
+                vm_set_input(fp_input);
+                vm_set_output(fp_output);
+                vm_exec();
+            }
+            if (fp_input != stdin && fp_input != NULL) fclose(fp_input);
+            if (fp_output != stdout && fp_output != NULL) fclose(fp_output);
         }
         else
         {

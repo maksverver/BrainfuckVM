@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 #include "vm.h"
 #include "elf-dumper.h"
+#include "debugger.h"
 #include "codebuf.h"
 #include <signal.h>
 #include <stdio.h>
@@ -10,87 +11,63 @@
 #include <sys/ucontext.h>
 #include <sys/mman.h>
 
+#if __x86_64
+#define IP   REG_RIP
+#define HEAD REG_RAX
+#define LONGPREFIX 0x48,
+#elif __i386
+#define IP   REG_EIP
+#define HEAD REG_EAX
+#define LONGPREFIX
+#else
+#error "Could not determine target machine type."
+#endif
+
 static int pagesize;
 static struct sigaction oldact_sigsegv;
 static Cell *tape;
 static size_t tape_size;            /* in bytes */
 static size_t max_tape_size;        /* in bytes */
 static CodeBuf code;
+static FILE *input, *output;
 static int cell_value;  /* used during code generation */
 static int zf_valid;    /* used during code generation */
 
-/* Debug-prints the current head position and context data.
-   Accepts out-of-range head positions. */
-static Cell *debug_print(Cell *head)
+static void range_check(Cell *cell, Cell **head)
 {
-    ssize_t min, pos, max, i;
-
-    pos = head - tape;
-    if (pos - 10 < 0)
-    {
-        min = 0;
-        max = 20;
-    }
-    else
-    if (pos + 10 > (ssize_t)tape_size - 1)
-    {
-        min = tape_size - 21;
-        max = tape_size - 1;
-    }
-    else
-    {
-        min = pos - 10;
-        max = pos + 10;
-    }
-
-    fprintf(stderr, "%3d[%3d]%3d:", (int)min, (int)pos, (int)max);
-    for (i = min; i <= max; ++i)
-    {
-        fputc((i == pos) ? '[' : (i == pos + 1) ? ']' : ' ', stderr);
-        fprintf(stderr, "%02x", tape[i]);
-    }
-    if (i == pos + 1) fputc(']', stderr);
-    fputc('\n', stderr);
-    return head;
-}
-
-static void vm_expand(void);
-
-static void range_check(Cell *head)
-{
-    if (head < tape)
+    if (cell < tape)
     {
         fprintf(stderr, "tape head exceeds left bound!\n");
-        debug_print(head);
-        assert(tape - head < pagesize);
+        debug_break(head);
+        assert(tape - cell < pagesize);
         exit(1);
     }
-    if (head >= tape + tape_size)
+    if (cell >= tape + tape_size)
     {
-        assert(head - (tape + tape_size) < pagesize);
-        vm_expand();
+        assert(cell - (tape + tape_size) < pagesize);
+        vm_expand(head);
     }
 }
 
 static Cell *vm_read(Cell *head)
 {
     int c;
-    range_check(head);
-    if ((c = getchar()) != EOF) *head = c;
+    range_check(head, &head);
+    if ((c = getc(input)) != EOF) *head = c;
     return head;
 }
 
 static Cell *vm_write(Cell *head)
 {
-    range_check(head);
-    putchar(*head);
+    range_check(head, &head);
+    putc(*head, output);
     return head;
 }
 
 static Cell *vm_debug(Cell *head)
 {
-    range_check(head);
-    debug_print(head);
+    range_check(head, &head);
+    debug_break(&head);
     return head;
 }
 
@@ -99,12 +76,13 @@ VM_Callback vm_callbacks[CB_COUNT] = { &vm_read, &vm_write, &vm_debug };
 static void sigsegv_handler(int signum, siginfo_t *info, void *ucontext_arg)
 {
     ucontext_t *uc = (ucontext_t*)ucontext_arg;
-    size_t code_pos, data_pos;
+    char *ip;
+    Cell *head;
 
     if (signum != SIGSEGV) return;
 
-    code_pos = (size_t)((char*)uc->uc_mcontext.gregs[REG_RIP] - code.data);
-    if (code_pos >= code.size)
+    ip = (char*)uc->uc_mcontext.gregs[IP];
+    if (ip < code.data || ip >= code.data + code.size)
     {
         /* Segmentation fault occured outside of generated program code: */
         fprintf(stderr, "segmentation fault occured!\n");
@@ -112,24 +90,24 @@ static void sigsegv_handler(int signum, siginfo_t *info, void *ucontext_arg)
     }
 
     /* Range check on error address, update RAX and restart: */
-    data_pos = (Cell*)uc->uc_mcontext.gregs[REG_RAX] - tape;
-    range_check((Cell*)info->si_addr);
-    uc->uc_mcontext.gregs[REG_RAX] = (greg_t)(tape + data_pos);
+    head = (Cell*)uc->uc_mcontext.gregs[HEAD];
+    range_check((Cell*)info->si_addr, &head);
+    uc->uc_mcontext.gregs[HEAD] = (greg_t)head;
     return;
 }
 
 static void gen_bound_check(void)
 {
     /* testb $0, (%rax) */
-    static const char text[3] = { 0xf6, 0x00, 0x00 };
+    static const char text[] = { 0xf6, 0x00, 0x00 };
     cb_append(&code, text, sizeof(text));
 }
 
 static void gen_large_move(int dist)
 {
     /* addq $<dist>, %rax */
-    const char text[6] = { 0x48, 0x05,
-                           dist >> 0, dist >> 8, dist >> 16, dist >> 24 };
+    const char text[] = { LONGPREFIX 0x05,
+                          dist >> 0, dist >> 8, dist >> 16, dist >> 24 };
     cb_append(&code, text, sizeof(text));
 }
 
@@ -159,8 +137,8 @@ static void gen_move(int dist)
     }
     else
     if (dist >= -128 && dist < 128)
-    {
-        const char text[4] = { 0x48, 0x83, 0xc0, dist };
+    {   /* add <dist>, %rax */
+        const char text[] = { LONGPREFIX 0x83, 0xc0, dist };
         cb_append(&code, text, sizeof(text));
     }
     else
@@ -218,31 +196,31 @@ static void gen_loop_code(AstNode *node)
         break;
     case 2:
         {
-            const char prefix[2] = {
+            const char prefix[] = {
                 0x74, dist1 };          /* jz <d1> */
-            cb_insert(&code, prefix, 2, start);
+            cb_insert(&code, prefix, sizeof(prefix), start);
         } break;
     case 5:
         {
-            const char prefix[5] = {
-                0x80, 0x38, 0x00,       /* cmp $0, (%rax) */
+            const char prefix[] = {
+                0x80, 0x38, 0x00,       /* cmpb $0, (%rax) */
                 0x74, dist1 };          /* jz <d1> */
-            cb_insert(&code, prefix, 5, start);
+            cb_insert(&code, prefix, sizeof(prefix), start);
         } break;
     case 6:
         {
-            const char prefix[6] = {
+            const char prefix[] = {
                 0x0f, 0x84,             /* jz .. */
                 dist1 >> 0, dist1 >> 8, dist1 >> 16, dist1 >> 24 };
-            cb_insert(&code, prefix, 6, start);
+            cb_insert(&code, prefix, sizeof(prefix), start);
         } break;
     case 9:
         {
-            const char prefix[9] = {
-                0x80, 0x38, 0x00,       /* cmp $0, (%rax) */
+            const char prefix[] = {
+                0x80, 0x38, 0x00,       /* cmpb $0, (%rax) */
                 0x0f, 0x84,             /* jz .. */
                 dist1 >> 0, dist1 >> 8, dist1 >> 16, dist1 >> 24 };
-            cb_insert(&code, prefix, 9, start);
+            cb_insert(&code, prefix, sizeof(prefix), start);
         } break;
     default:
         assert(0);
@@ -256,31 +234,31 @@ static void gen_loop_code(AstNode *node)
         break;
     case 2:
         {
-            const char suffix[2] = {
+            const char suffix[] = {
                 0x75, dist2 };          /* jnz <d2> */
-            cb_append(&code, suffix, 2);
+            cb_append(&code, suffix, sizeof(suffix));
         } break;
     case 5:
         {
-            const char suffix[5] = {
-                0x80, 0x38, 0x00,       /* cmp $0, (%rax) */
+            const char suffix[] = {
+                0x80, 0x38, 0x00,       /* cmpb $0, (%rax) */
                 0x75, dist2 };          /* jnz <d2> */
-            cb_append(&code, suffix, 5);
+            cb_append(&code, suffix, sizeof(suffix));
         } break;
     case 6:
         {
-            const char suffix[6] = {
+            const char suffix[] = {
                 0x0f, 0x85,             /* jnz .. */
                 dist2 >> 0, dist2 >> 8, dist2 >> 16, dist2 >> 24 };
-            cb_append(&code, suffix, 6);
+            cb_append(&code, suffix, sizeof(suffix));
         } break;
     case 9:
         {
-            const char suffix[9] = {
-                0x80, 0x38, 0x00,       /* cmp $0, (%rax) */
+            const char suffix[] = {
+                0x80, 0x38, 0x00,       /* cmpb $0, (%rax) */
                 0x0f, 0x85,             /* jnz .. */
                 dist2 >> 0, dist2 >> 8, dist2 >> 16, dist2 >> 24 };
-            cb_append(&code, suffix, 9);
+            cb_append(&code, suffix, sizeof(suffix));
         } break;
     default:
         assert(0);
@@ -320,14 +298,14 @@ static int gen_special_loop_code(AstNode *child)
     {
         int bit;
 
-        static const char text[2] = { 0x8a, 0x08 };  /* movb (%rax), %bl */
+        static const char text[] = { 0x8a, 0x08 };  /* movb (%rax), %cl */
         cb_append(&code, text, sizeof(text));
 
         for (bit = 0; bit < num_bits; ++bit)
         {
             if (bit > 0)
             {
-                static const char text[2] = { 0x00, 0xc9 };  /* addb %bl, %bl */
+                static const char text[] = { 0x00, 0xc9 };  /* addb %bl, %cl */
                 cb_append(&code, text, sizeof(text));
             }
             for (pos = child->begin; pos < child->end; ++pos)
@@ -339,12 +317,12 @@ static int gen_special_loop_code(AstNode *child)
                     {
                         if (pos >= -128 && pos < 128)
                         {   /* addb %cl, <pos>(%rax) */
-                            const char text[3] = { 0x00, 0x48, pos };
+                            const char text[] = { 0x00, 0x48, pos };
                             cb_append(&code, text, sizeof(text));
                         }
                         else
                         {   /* addb %cl, <pos>(%rax) */
-                            const char text[6] = { 0x00, 0x88,
+                            const char text[] = { 0x00, 0x88,
                                 pos >> 0, pos >> 8, pos >> 16, pos >> 24 };
                             cb_append(&code, text, sizeof(text));
                         }
@@ -354,12 +332,12 @@ static int gen_special_loop_code(AstNode *child)
                     {
                         if (pos >= -128 && pos < 128)
                         {   /* subb %cl, <pos>(%rax) */
-                            const char text[3] = { 0x28, 0x48, pos };
+                            const char text[] = { 0x28, 0x48, pos };
                             cb_append(&code, text, sizeof(text));
                         }
                         else
                         {   /* subb %cl, <pos>(%rax) */
-                            const char text[6] = { 0x28, 0x88,
+                            const char text[] = { 0x28, 0x88,
                                 pos >> 0, pos >> 8, pos >> 16, pos >> 24 };
                             cb_append(&code, text, sizeof(text));
                         }
@@ -371,10 +349,11 @@ static int gen_special_loop_code(AstNode *child)
 
     /* Finally, clear current cell: */
     {
-        /* FIXME: alternatively, I could use andb $0, (%rax) to achieve the
-            same result while updating the zero-flag which may allow me to
-            generate less code. However, maybe this is less efficient? */
-        char text[3] = { 0xc6, 0x00, 0x00 }; /* movb $0, (%rax) */
+        /* Alternatively, I could use andb $0, (%rax) to achieve the same result
+          while updating the zero-flag which may allow me to generate less code.
+          However, this is a slightly less efficient operation, and it is
+          unlikely this instruction will be followed by a test anyway. */
+        char text[] = { 0xc6, 0x00, 0x00 }; /* movb $0, (%rax) */
         cb_append(&code, text, sizeof(text));
     }
 
@@ -400,7 +379,7 @@ static void gen_code(AstNode *node)
         case OP_ADD:
             if ((char)node->value != 0)
             {   /* addb <value>, (%rax) */
-                const char text[3] = { 0x80, 0x00, (char)node->value };
+                const char text[] = { 0x80, 0x00, (char)node->value };
                 cb_append(&code, text, sizeof(text));
                 cell_value = (cell_value == 0) ? 1 : -1;
                 zf_valid = 1;
@@ -424,20 +403,30 @@ static void gen_code(AstNode *node)
             break;
 
         case OP_CALL:
-            {   /* movq  %rax, %rdi */
-                char text[3] = { 0x48, 0x89, 0xc7 };
+            {
+#if __x86_64
+                char text[] = { LONGPREFIX 0x89, 0xc7 };  /* movq  %rax, %rdi */
+#elif __i386
+                char text[] = { 0x50 };                   /* pushl %eax */
+#endif
                 cb_append(&code, text, sizeof(text));
                 assert(node->value >= 0 && node->value < CB_COUNT);
                 if (node->value == 0)
                 {   /* call *(%rbx) */
-                    static const char text[2] = { 0xff, 0x13 };
+                    static const char text[] = { 0xff, 0x13 };
                     cb_append(&code, text, sizeof(text));
                 }
                 else
-                {   /* call *val(%rbx) */
-                    char text[3] = { 0xff, 0x53, 8*node->value };
+                {   /* call *<offset>(%rbx) */
+                    char text[] = { 0xff, 0x53, sizeof(void*)*node->value };
                     cb_append(&code, text, sizeof(text));
                 }
+#if __i386
+                {
+                    char text[] = { 0x83, 0xc4, 0x04 };   /* addl $4, %esp */
+                    cb_append(&code, text, sizeof(text));
+                }
+#endif
                 cell_value = -1;
                 zf_valid   =  0;
             } break;
@@ -456,19 +445,19 @@ static void gen_code(AstNode *node)
                     if (pos == node->value || node->add[pos] == 0) continue;
                     if (pos == 0)
                     {   /* addb $<value>, (%rax) */
-                        const char text[3] = { 0x80, 0x00, node->add[pos] };
+                        const char text[] = { 0x80, 0x00, node->add[pos] };
                         cb_append(&code, text, sizeof(text));
                     }
                     else
                     if (pos >= -128 && pos < 128)
                     {   /* addb $<value>, <pos>(%rax) */
-                        const char text[4] = { 0x80, 0x40,
+                        const char text[] = { 0x80, 0x40,
                             pos, node->add[pos] };
                         cb_append(&code, text, sizeof(text));
                     }
                     else
                     {   /* addb $<value>, <pos>(%rax) */
-                        const char text[7] = { 0x80, 0x80,
+                        const char text[] = { 0x80, 0x80,
                             pos, pos >> 8, pos >> 16, pos >> 24,
                             node->add[pos] };
                         cb_append(&code, text, sizeof(text));
@@ -482,7 +471,7 @@ static void gen_code(AstNode *node)
                 if (node->add[node->value] != 0)
                 {
                     /* addb $<value>, (%rax) */
-                    const char text[3] = { 0x80, 0x00, node->add[node->value] };
+                    const char text[] = { 0x80, 0x00, node->add[node->value] };
                     cb_append(&code, text, sizeof(text));
                     zf_valid = 1;
                 }
@@ -511,12 +500,21 @@ static void gen_code(AstNode *node)
 
 static void gen_func(AstNode *ast)
 {
-    static const char prologue[7] = {
-        0x53,                   /* pushq %rbx */
-        0x48, 0x89, 0xf8,       /* movq %rdi, %rax */
-        0x48, 0x89, 0xf3 };     /* movq %rsi, %rbx */
-    static const char epilogue[2] = {
+    static const char prologue[] = {
+        0x55,                       /* push %rbp */
+        LONGPREFIX 0x89, 0xe5,      /* movq %rsp, %rbp */
+        0x53,                       /* pushq %rbx */
+#if __x86_64
+        LONGPREFIX 0x89, 0xf8,      /* movq %rdi, %rax */
+        LONGPREFIX 0x89, 0xf3 };    /* movq %rsi, %rbx */
+#elif __i386
+        0x8b, 0x45, 0x08,           /* mov  8(%ebp), %eax */
+        0x8b, 0x5d, 0x0c };         /* mov 12(%ebp), %ebx */
+#endif
+
+    static const char epilogue[] = {
         0x5b,                   /* popq %rbx */
+        0x5d,                   /* popq %ebp */
         0xc3 };                 /* ret */
 
     /* cell_value keeps track of the value in the cell under the tape head
@@ -560,7 +558,7 @@ static void vm_alloc(size_t size)
 
     data = mmap(NULL, size + 2*pagesize, PROT_NONE,
                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-    if (data == NULL)
+    if (data == MAP_FAILED)
     {
         fprintf(stderr, "out of memory\n");
         exit(1);
@@ -582,15 +580,14 @@ static void vm_alloc(size_t size)
         assert(res == 0);
         tape = mremap(tape, tape_size,
                       size, MREMAP_MAYMOVE | MREMAP_FIXED, start);
+        if (tape == MAP_FAILED)
+        {
+            fprintf(stderr, "out of memory\n");
+            exit(1);
+        }
         assert((char*)tape == start);
     }
     tape_size = size;
-}
-
-static void vm_expand(void)
-{
-    assert(tape_size >= (size_t)pagesize);
-    vm_alloc(tape_size + (tape_size/pagesize + 3)/4*pagesize);
 }
 
 void vm_init(void)
@@ -613,7 +610,19 @@ void vm_load(AstNode *ast)
     gen_func(ast);
 }
 
-void vm_limit_mem(size_t size)
+void vm_set_input(FILE *fp)
+{
+    assert(fp != NULL);
+    input = fp;
+}
+
+void vm_set_output(FILE *fp)
+{
+    assert(fp != NULL);
+    output = fp;
+}
+
+void vm_set_memlimit(size_t size)
 {
     if (size < (size_t)pagesize)
     {
@@ -626,8 +635,9 @@ void vm_limit_mem(size_t size)
 
 void vm_exec(void)
 {
-    Cell *pos = ((Cell *(*)(Cell*, VM_Callback*))code.data)(tape, vm_callbacks);
-    range_check(pos);
+    Cell *head = tape;
+    head = ((Cell *(*)(Cell*, VM_Callback*))code.data)(head, vm_callbacks);
+    range_check(head, &head);
 }
 
 void vm_fini(void)
@@ -640,4 +650,18 @@ void vm_fini(void)
 void vm_dump(FILE *fp)
 {
     elf_dump(fp, code.data, code.size);
+}
+
+void vm_expand(Cell **head)
+{
+    size_t head_pos = (head == NULL) ? 0 : *head - tape;
+    assert(tape_size >= (size_t)pagesize);
+    vm_alloc(tape_size + (tape_size/pagesize + 3)/4*pagesize);
+    if (head != NULL) *head = tape + head_pos;
+}
+
+Cell *vm_memory(size_t *size)
+{
+    if (size != NULL) *size = tape_size;
+    return tape;
 }

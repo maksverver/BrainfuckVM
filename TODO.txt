@@ -14,9 +14,9 @@
     peephole optimization (only if optimizations are enabled)
     bytecode generation
 
- - support compiling for 32-bit Linux
-   (should be relatively easy, but requires restructuring some VM code)
+Debugger:
+ - functions to display/manipulate the current code position.
+ - function to write to memory at an absolute address.
 
 Long-term:
- - add better debugging support to the VM
  - add profiling support to the VM (how?)
