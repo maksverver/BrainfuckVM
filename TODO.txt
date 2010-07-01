@@ -1,3 +1,5 @@
+ - break to debugger on Ctrl-C (only if executing inside the Brainfuck code!)
+
  - create test cases that cover all the possible optimizations and code
    generation scenario's.
 
@@ -5,14 +7,17 @@
 
  - check for memory leaks
 
+ - call into debugger on all errors (e.g. on allocation failure/memory limit
+   exceeded) if possible
+
  - update mapping doc with latest data (or remove it)
 
  - MAYBE: align branch targets?
 
  - MAYBE: separate code generation into:
-    symbolic code generation
+    symbolic code generation (easy)
     peephole optimization (only if optimizations are enabled)
-    bytecode generation
+    bytecode generation (how to do this in a single pass?)
 
 Debugger:
  - functions to display/manipulate the current code position.
