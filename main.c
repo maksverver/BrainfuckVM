@@ -54,7 +54,7 @@ static size_t parse_size(const char *arg)
 static void parse_args(int argc, char *argv[])
 {
     int c;
-    while ((c = getopt(argc, argv, "Oc:d::e:i:m:o:p:z:")) >= 0)
+    while ((c = getopt(argc, argv, "Oc:d::e:i:m:o:pz:")) >= 0)
     {
         switch (c)
         {
