@@ -18,6 +18,7 @@ static int          arg_debug        = -1;
 static int          arg_print        = 0;
 static const char   *arg_object      = NULL;
 static size_t       arg_mem_limit    = (size_t)-1;
+static int          arg_eof_value    = -1;
 
 static void exit_usage(void)
 {
@@ -31,7 +32,8 @@ static void exit_usage(void)
         "\t-i <path> read input from file at <path> instead of standard input\n"
         "\t-m <size> tape memory limit (K, M or G suffix recognized)\n"
         "\t-o <path> write output to file at <path> instead of standard output\n"
-        "\t-p        print compact code (don't execute)\n" );
+        "\t-p        print compact code (don't execute)\n"
+        "\t-z <val>  value written to cell when reading fails\n" );
     exit(0);
 }
 
@@ -52,7 +54,7 @@ static size_t parse_size(const char *arg)
 static void parse_args(int argc, char *argv[])
 {
     int c;
-    while ((c = getopt(argc, argv, "Oc:d::e:i:m:o:p")) >= 0)
+    while ((c = getopt(argc, argv, "Oc:d::e:i:m:o:p:z:")) >= 0)
     {
         switch (c)
         {
@@ -86,6 +88,11 @@ static void parse_args(int argc, char *argv[])
 
         case 'p':
             arg_print = 1;
+            break;
+
+
+        case 'z':
+            arg_eof_value = atoi(optarg)&255;
             break;
 
         case '?':
@@ -175,6 +182,7 @@ int main(int argc, char *argv[])
             FILE *fp_input = stdin, *fp_output = stdout;
 
             if (arg_mem_limit != (size_t)-1) vm_set_memlimit(arg_mem_limit);
+            if (arg_eof_value != -1) vm_set_eof_value(arg_eof_value);
 
             if (arg_input_path != NULL &&
                 (fp_input = fopen(arg_input_path, "r")) == NULL)

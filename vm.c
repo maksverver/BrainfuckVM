@@ -28,6 +28,7 @@ static struct sigaction oldact_sigsegv;
 static Cell *tape;
 static size_t tape_size;            /* in bytes */
 static size_t max_tape_size;        /* in bytes */
+static int eof_value;               /* negative for none */
 static CodeBuf code;
 static FILE *input, *output;
 static int cell_value;  /* used during code generation */
@@ -54,6 +55,7 @@ static Cell *vm_read(Cell *head)
     int c;
     range_check(head, &head);
     if ((c = getc(input)) != EOF) *head = c;
+    else if (eof_value >= 0) *head = (Cell)eof_value;
     return head;
 }
 
@@ -601,6 +603,7 @@ void vm_init(void)
     cb_create(&code);
     assert(CB_COUNT < 32);
     max_tape_size = 0;
+    eof_value = -1;
     vm_alloc(0);
 }
 
@@ -631,6 +634,12 @@ void vm_set_memlimit(size_t size)
         exit(1);
     }
     max_tape_size = size;
+}
+
+void vm_set_eof_value(int val)
+{
+    assert(val == -1 || (val&~0xff) == 0);
+    eof_value = val;
 }
 
 void vm_exec(void)
