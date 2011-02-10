@@ -1,6 +1,7 @@
-CFLAGS=-Wall -Wextra -O2 -g
+CFLAGS=-Wall -Wextra -O2 -g -DWITH_READLINE
 OBJS=ast.o ast-printer.o codebuf.o debugger.o elf-dumper.o \
 	parser.o main.o optimizer.o vm.o
+LDFLAGS=-lreadline
 
 all: bfi
 

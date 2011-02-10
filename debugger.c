@@ -1,5 +1,10 @@
 #include "debugger.h"
 #include <stdio.h>
+#include <string.h>
+#ifdef WITH_READLINE
+#include <readline/readline.h>
+#include <readline/history.h>
+#endif
 
 static int cont;
 
@@ -204,7 +209,7 @@ static void change_value(Cell **head, const char *cmd,
     args = sscanf(cmd, "%*s %d %lld", &value, &offset);
     if (args < 1)
     {
-        fprintf(stderr, "Too few arguments for %s' command!\n", name);
+        fprintf(stderr, "Too few arguments for `%s' command!\n", name);
     }
     else
     {
@@ -237,19 +242,32 @@ void debug_subtract(Cell **head, const char *cmd)
     return change_value(head, cmd, "subtract", 1, -1);
 }
 
+#ifndef WITH_READLINE
+static char *readline(const char *prompt)
+{
+    char buf[1024];
+
+    fputs(prompt, stderr);
+    fflush(stderr);
+    if (fgets(buf, sizeof(buf), stdin) == NULL) return NULL;
+    return strdup(buf);
+}
+
+static void add_history(char*)
+{
+}
+#endif
+
 void debug_break(Cell **head)
 {
-    char line[1024];
-
     fflush(stdout);
     while (cont == 0)
     {
         struct Command *c, *matched = NULL;
         int matches = 0;
+        char *line = readline("(debug) ");
 
-        fprintf(stderr, "(debug) ");
-        fflush(stderr);
-        if (fgets(line, sizeof(line), stdin) == NULL)
+        if (line == NULL)
         {
             putc('\n', stderr);
             exit(0);
@@ -272,7 +290,9 @@ void debug_break(Cell **head)
         else
         {
             matched->handler(head, line);
+            add_history(line);
         }
+        free(line);
     }
     if (cont > 0) --cont;
 }
