@@ -32,11 +32,9 @@ static struct Command commands[] = {
 "\tdefaults to 1 (break at the next breakboint). When N is 0, continues\n"
 "\texecution indefinitely, never breaking again.\n",
     debug_continue },
-{ "display", "[<start> [<length>]]\n"
-"\tDisplays tape memory starting from `start' and printing `length' bytes\n"
-"\tin total. If `length' is not given, prints a single row of data. If\n"
-"\t`start' is not given, selects the starting address such that the current\n"
-"\ttape head is in the middle of the displayed data.\n",
+{ "display", "[<start> [<width>] [<height>]]\n"
+"\tDisplays tape memory, starting at offset `start' (or near the tape head if\n"
+"\tstart is not given), in `height' lines showing `width' bytes each.\n",
     debug_display },
 { "head", "[<position>]\n"
 "\tWithout an argument, displays the current (zero-based) position of the\n"
@@ -137,33 +135,35 @@ void debug_continue(Cell **head, const char *cmd)
 
 void debug_display(Cell **head, const char *cmd)
 {
-    long long arg_start, arg_length;
-    size_t size, start, length, n;
-    Cell *tape;
+    long long arg_start, arg_cols, arg_rows;
+    size_t size, start, cols, rows, r, c;
+    Cell *tape, *pos;
 
     tape = vm_memory(&size);
 
     /* Parse start and length: */
-    arg_start  = (long long)(*head - tape) - 6;
-    arg_length = -1;
-    sscanf(cmd, "%*s %lld %lld", &arg_start, &arg_length);
-    start  = arg_start > 0 ? (size_t)arg_start : (size_t)0;
-    length = arg_length > 0 ? (size_t)arg_length : 14;
-    if (length > size) length = size;
+    arg_start = (long long)(*head - tape) - 6;
+    arg_cols  = -1;
+    arg_rows  = -1;
+    sscanf(cmd, "%*s %lld %lld %lld", &arg_start, &arg_cols, &arg_rows);
+    start = arg_start > 0 ? (size_t)arg_start : (size_t)0;
+    cols  = arg_cols  > 0 ? (size_t)arg_cols  : 14; 
+    rows  = arg_rows  > 0 ? (size_t)arg_rows  : 1;
 
     /* Display selected range of data: */
-    for (n = 0; n < length; ++n)
+    pos = tape + (start < size ? start : size);
+    for (r = 0; r < rows; ++r)
     {
-        if (n%14 == 0)
+        fprintf(stderr, "%8lld: ", (long long)(start + cols*r));
+        for (c = 0; c < cols; ++c)
         {
-            if (n > 0) putc('\n', stderr);
-            fprintf(stderr, "%8lld: ", (long long)(start + n));
+            fprintf(stderr,
+                (pos == *head) ? "[%3d]" : " %3d ",
+                (pos < tape + size) ? *pos : 0 );
+            ++pos;
         }
-        fprintf(stderr,
-            (tape + start + n == *head) ? "[%3d]" : " %3d ",
-            (start + n < size) ? tape[start + n] : 0 );
+        putc('\n', stderr);
     }
-    putc('\n', stderr);
 }
 
 void debug_head(Cell **head, const char *cmd)

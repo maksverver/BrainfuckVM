@@ -22,6 +22,9 @@
 Debugger:
  - functions to display/manipulate the current code position.
  - function to write to memory at an absolute address.
+   (interpret '+x'/'-x' as head-relative offsets, and 'x' as absolute?)
+ - extend writing functions to allow a range of memory to be filled
+   (add an extra parameter that specifies an end position, or a length?)
 
 Long-term:
  - add profiling support to the VM (how?)
