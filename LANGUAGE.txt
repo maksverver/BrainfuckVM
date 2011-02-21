@@ -1,0 +1,49 @@
+THE BRAINFUCK PROGRAMMING LANGUAGE
+----------------------------------
+
+A Brainfuck program controls a machine consisting of a tape (an infinite array
+of cells, initialized to 0) and a tape head (a pointer to a cell).
+
+A program is constructed of the following eight ASCII characters:
+
+  +   Increments the cell referenced by the tape head
+  -   Decrements the cell referenced by the tape head
+  >   Increments the tape head
+  <   Decrements the tape head
+  .   Writes the value in the cell referenced by the tape head as a byte
+  ,   Reads a byte and stores it at the cell referenced by the tape head
+  [   If the current cell is zero, jumps to the matching closing bracket.
+  ]   If the current cell is nonzero, jumps to the matching opening bracket.
+
+Any other bytes encountered in the source code are ignored; they are explicitly
+allowed to serve as commentary.
+
+IMPLEMENTATION DETAILS
+----------------------
+Different Brainfuck interpreters exist with slightly different semantics.  This
+implementation mostly follows Urban Müller's original specification.
+
+The tape is bounded on the left, but infinite on the right. The tape head starts
+at the left end of the tape; decrementing the pointer there yields a runtime
+error.  The -m option allows the user to specify a memory limit to impose on the
+tape, effectively bounding it on the right too, which is useful for debugging.
+
+Every cell can store 256 ordered values, and these wrap around: incrementing the
+255th value yields 0, and decrementing 0 yields the 255th value.  The -w option
+enables runtime wraparound detection; this is mainly useful for programmers that
+want to avoid wraparound out of principle.
+
+When reading fails, the interpreter leaves the current cell unchanged by
+default.  The -z option allows this behaviour to be changed to writing a
+specific value to the cell when reading fails.  Note that failure includes
+both end-of-file and true reading errors.
+
+The -d option causes the interpreter to recognize a special character ('!' by
+default) as a command to break into the built-in debugger.
+
+The interpreter warns about but accepts source code with non-matching brackets.
+There is no guarantee they are parsed as intended.
+
+The interpreter is always safe (it prevents reads or writes outside the tape)
+but when optimizations are enabled with -O, some error conditions like moving
+the tape head out of bounds, or wrapping cell values, may no longer be detected.

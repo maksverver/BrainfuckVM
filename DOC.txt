@@ -2,6 +2,7 @@ An all-purpose Brainfuck VM.
 
 Main features:
  - A clear execution model, fully enforced by the runtime environment.
+   See LANGUAGE.txt for details.
  - High performance by using a just-in-time compiler to generate native code
    rather than interpret the Brainfuck code directly.
 
