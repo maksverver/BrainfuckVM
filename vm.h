@@ -17,6 +17,7 @@ extern void vm_set_input(FILE *fp);
 extern void vm_set_output(FILE *fp);
 extern void vm_set_memlimit(size_t size);
 extern void vm_set_eof_value(int val);
+extern void vm_set_wrap_check(int enable);
 extern void vm_exec(void);
 extern void vm_fini(void);
 extern void vm_dump(FILE *fp);

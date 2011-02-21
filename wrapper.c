@@ -24,14 +24,14 @@ static Cell *write(Cell *head)
     return head;
 }
 
-static Cell *debug(Cell *head)
+static Cell *dummy(Cell *head)
 {
     return head;
 }
 
 int main()
 {
-    static Callback callbacks[3] = { read, write, debug };
+    static Callback callbacks[3] = { read, write, dummy, dummy };
     static Cell tape[1<<16] = { 0 };
     bfmain(tape, callbacks);
     return 0;

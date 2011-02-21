@@ -6,6 +6,7 @@ typedef enum {
     CB_READ,
     CB_WRITE,
     CB_DEBUG,
+    CB_WRAPPED,
     CB_COUNT
 } CallType;
 

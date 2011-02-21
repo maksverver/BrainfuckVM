@@ -29,6 +29,7 @@ static Cell *tape;
 static size_t tape_size;            /* in bytes */
 static size_t max_tape_size;        /* in bytes */
 static int eof_value;               /* negative for none */
+static int wrap_check;
 static CodeBuf code;
 static FILE *input, *output;
 static int cell_value;  /* used during code generation */
@@ -73,7 +74,14 @@ static Cell *vm_debug(Cell *head)
     return head;
 }
 
-VM_Callback vm_callbacks[CB_COUNT] = { &vm_read, &vm_write, &vm_debug };
+static Cell *vm_wrapped(Cell *head)
+{
+    fprintf(stderr, "cell value wrapped around!\n");
+    return vm_debug(head);
+}
+
+VM_Callback vm_callbacks[CB_COUNT] = {
+    &vm_read, &vm_write, &vm_debug, &vm_wrapped };
 
 static void sigsegv_handler(int signum, siginfo_t *info, void *ucontext_arg)
 {
@@ -365,6 +373,35 @@ static int gen_special_loop_code(AstNode *child)
     return 1;
 }
 
+static void gen_call(int index)
+{
+#if __x86_64
+    char text[] = { LONGPREFIX 0x89, 0xc7 };  /* movq  %rax, %rdi */
+#elif __i386
+    char text[] = { 0x50 };                   /* pushl %eax */
+#endif
+    cb_append(&code, text, sizeof(text));
+    assert(index >= 0 && index < CB_COUNT);
+    if (index == 0)
+    {   /* call *(%rbx) */
+        static const char text[] = { 0xff, 0x13 };
+        cb_append(&code, text, sizeof(text));
+    }
+    else
+    {   /* call *<offset>(%rbx) */
+        char text[] = { 0xff, 0x53, sizeof(void*)*index };
+        cb_append(&code, text, sizeof(text));
+    }
+#if __i386
+    {
+        char text[] = { 0x83, 0xc4, 0x04 };   /* addl $4, %esp */
+        cb_append(&code, text, sizeof(text));
+    }
+#endif
+    cell_value = -1;
+    zf_valid   =  0;
+}
+
 static void gen_code(AstNode *node)
 {
     for ( ; node != NULL; node = node->next)
@@ -380,11 +417,29 @@ static void gen_code(AstNode *node)
 
         case OP_ADD:
             if ((char)node->value != 0)
-            {   /* addb <value>, (%rax) */
-                const char text[] = { 0x80, 0x00, (char)node->value };
-                cb_append(&code, text, sizeof(text));
+            {
+                if (node->value >= 0)
+                {   /* addb <value>, (%rax) */
+                    char text[] = { 0x80, 0x00, (char)node->value };
+                    cb_append(&code, text, sizeof(text));
+                }
+                else  /* node->value < 0 */
+                {   /* subb <-value>, (%rax) */
+                    char text[] = { 0x80, 0x28, (char)-node->value };
+                    cb_append(&code, text, sizeof(text));
+                }
                 cell_value = (cell_value == 0) ? 1 : -1;
                 zf_valid = 1;
+                if (wrap_check)
+                {
+                    int start = code.size;
+                    gen_call(CB_WRAPPED);
+                    if (node->value > -256 && node->value < 256)
+                    {   /* jnc <dist> */
+                        const char text[] = { 0x73, code.size - start };
+                        cb_insert(&code, text, sizeof(text), start);
+                    }
+                }
             }
             break;
 
@@ -405,33 +460,8 @@ static void gen_code(AstNode *node)
             break;
 
         case OP_CALL:
-            {
-#if __x86_64
-                char text[] = { LONGPREFIX 0x89, 0xc7 };  /* movq  %rax, %rdi */
-#elif __i386
-                char text[] = { 0x50 };                   /* pushl %eax */
-#endif
-                cb_append(&code, text, sizeof(text));
-                assert(node->value >= 0 && node->value < CB_COUNT);
-                if (node->value == 0)
-                {   /* call *(%rbx) */
-                    static const char text[] = { 0xff, 0x13 };
-                    cb_append(&code, text, sizeof(text));
-                }
-                else
-                {   /* call *<offset>(%rbx) */
-                    char text[] = { 0xff, 0x53, sizeof(void*)*node->value };
-                    cb_append(&code, text, sizeof(text));
-                }
-#if __i386
-                {
-                    char text[] = { 0x83, 0xc4, 0x04 };   /* addl $4, %esp */
-                    cb_append(&code, text, sizeof(text));
-                }
-#endif
-                cell_value = -1;
-                zf_valid   =  0;
-            } break;
+            gen_call(node->value);
+            break;
 
         case OP_ADD_MOVE:
             {
@@ -640,6 +670,12 @@ void vm_set_eof_value(int val)
 {
     assert(val == -1 || (val&~0xff) == 0);
     eof_value = val;
+}
+
+void vm_set_wrap_check(int val)
+{
+    assert(val == 0 || val == 1);
+    wrap_check = val;
 }
 
 void vm_exec(void)

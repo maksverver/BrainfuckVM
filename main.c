@@ -13,6 +13,7 @@ static const char   *arg_source_path = "-";
 static const char   *arg_source      = NULL;
 static const char   *arg_input_path  = NULL;
 static const char   *arg_output_path = NULL;
+static int          arg_wrap_check   = 0;
 static int          arg_optimize     = 0;
 static int          arg_debug        = -1;
 static int          arg_print        = 0;
@@ -33,6 +34,7 @@ static void exit_usage(void)
         "\t-m <size> tape memory limit (K, M or G suffix recognized)\n"
         "\t-o <path> write output to file at <path> instead of standard output\n"
         "\t-p        print compact code (don't execute)\n"
+        "\t-w        break to debugger when value wraps around\n"
         "\t-z <val>  value written to cell when reading fails\n" );
     exit(0);
 }
@@ -54,7 +56,7 @@ static size_t parse_size(const char *arg)
 static void parse_args(int argc, char *argv[])
 {
     int c;
-    while ((c = getopt(argc, argv, "Oc:d::e:i:m:o:pz:")) >= 0)
+    while ((c = getopt(argc, argv, "Oc:d::e:i:m:o:pwz:")) >= 0)
     {
         switch (c)
         {
@@ -90,6 +92,9 @@ static void parse_args(int argc, char *argv[])
             arg_print = 1;
             break;
 
+        case 'w':
+            arg_wrap_check = 1;
+            break;
 
         case 'z':
             arg_eof_value = atoi(optarg)&255;
@@ -163,6 +168,7 @@ int main(int argc, char *argv[])
     parse_free_result(pr);
 
     /* Optimize program (if requested): */
+    if (arg_wrap_check) vm_set_wrap_check(arg_wrap_check);
     if (arg_optimize) ast = optimize(ast);
 
     if (arg_print)
