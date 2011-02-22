@@ -178,8 +178,14 @@ void debug_head(Cell **head, const char *cmd)
     long long new_pos;
 
     tape = vm_memory(&size);
-    if (sscanf(cmd, "%*s %lld", &new_pos) < 1) new_pos = *head - tape;
-    set_head_pos(head, new_pos);
+    if (sscanf(cmd, "%*s %lld", &new_pos) == 1)
+    {
+        set_head_pos(head, new_pos);
+    }
+    else
+    {
+        fprintf(stderr, "%lld\n", (long long)(*head - tape));
+    }
 }
 
 void debug_move(Cell **head, const char *cmd)
