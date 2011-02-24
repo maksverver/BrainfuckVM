@@ -3,6 +3,7 @@
 #include "elf-dumper.h"
 #include "debugger.h"
 #include "codebuf.h"
+#include <execinfo.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
@@ -23,6 +24,7 @@
 #error "Could not determine target machine type."
 #endif
 
+static AstNode *program;
 static int pagesize;
 static struct sigaction oldact_sigsegv;
 static Cell *tape;
@@ -35,13 +37,32 @@ static FILE *input, *output;
 static int cell_value;  /* used during code generation */
 static int zf_valid;    /* used during code generation */
 
+/* Finds the offset of the instruction after the last one executed in the
+   code buffer (if any) or returns 0 if it is not found. */
+static size_t find_offset()
+{
+    void *addrs[32];
+    int n, naddr;
+
+    /* Search for origin of error in generated code: */
+    naddr = backtrace(&addrs[0], sizeof(addrs)/sizeof(addrs[0]));
+    for (n = 0; n < naddr; ++n)
+    {
+        if ((char*)addrs[n] > code.data &&
+            (char*)addrs[n] <= code.data + code.size)
+        {
+            return (char*)addrs[n] - code.data;
+        }
+    }
+    return 0;
+}
+
 static void range_check(Cell *cell, Cell **head)
 {
     if (cell < tape)
     {
         fprintf(stderr, "tape head exceeds left bound!\n");
-        debug_break(head);
-        assert(tape - cell < pagesize);
+        debug_break(head, program, find_offset());
         exit(1);
     }
     if (cell >= tape + tape_size)
@@ -70,7 +91,7 @@ static Cell *vm_write(Cell *head)
 static Cell *vm_debug(Cell *head)
 {
     range_check(head, &head);
-    debug_break(&head);
+    debug_break(&head, program, find_offset());
     return head;
 }
 
@@ -159,6 +180,17 @@ static void gen_move(int dist)
 
 static void gen_code(AstNode *node);
 
+static void move_code(AstNode *node, int dist)
+{
+    while (node != NULL)
+    {
+        node->code.begin += dist;
+        node->code.end   += dist;
+        move_code(node->child, dist);
+        node = node->next;
+    }
+}
+
 static void gen_loop_code(AstNode *node)
 {
     size_t start, size;
@@ -237,7 +269,10 @@ static void gen_loop_code(AstNode *node)
         break;
     }
 
-    /* Insert suffix test + conditional jump: */
+    /* Adjust code offsets in child nodes for inserted prefix: */
+    move_code(node->child, size1);
+
+    /* Append suffix test + conditional jump: */
     switch (size2)
     {
     case 0:
@@ -291,6 +326,8 @@ static int gen_special_loop_code(AstNode *child)
 
     /* Verify current cell changes by exactly 1 every step: */
     if (child->add[0] != -1 && child->add[0] != 1) return 0;
+
+    child->code.begin = code.size;
 
     /* Figure out maximum number of bits to be used: */
     for (pos = child->begin; pos < child->end; ++pos)
@@ -367,6 +404,8 @@ static int gen_special_loop_code(AstNode *child)
         cb_append(&code, text, sizeof(text));
     }
 
+    child->code.end = code.size;
+
     cell_value = 0;
     zf_valid   = 0;
 
@@ -406,6 +445,7 @@ static void gen_code(AstNode *node)
 {
     for ( ; node != NULL; node = node->next)
     {
+        node->code.begin = code.size;
         switch (node->type)
         {
         case OP_LOOP:
@@ -527,6 +567,7 @@ static void gen_code(AstNode *node)
         default:
             assert(0);
         }
+        node->code.end = code.size;
     }
 }
 
@@ -640,6 +681,7 @@ void vm_init(void)
 void vm_load(AstNode *ast)
 {
     cb_truncate(&code);
+    program = ast;
     gen_func(ast);
 }
 
@@ -682,7 +724,6 @@ void vm_exec(void)
 {
     Cell *head = tape;
     head = ((Cell *(*)(Cell*, VM_Callback*))code.data)(head, vm_callbacks);
-    range_check(head, &head);
 }
 
 void vm_fini(void)

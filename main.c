@@ -148,13 +148,13 @@ int main(int argc, char *argv[])
     for (msg = pr->warnings; msg != NULL; msg = msg->next)
     {
         fprintf(stderr, "Warning at line %d column %d: %s!\n",
-                        msg->line, msg->column, msg->message);
+            SRCLOC_LINE(msg->origin), SRCLOC_COLUMN(msg->origin), msg->message);
         ++warnings;
     }
     for (msg = pr->errors; msg != NULL; msg = msg->next)
     {
         fprintf(stderr, "Error at line %d column %d: %s!\n",
-                        msg->line, msg->column, msg->message);
+            SRCLOC_LINE(msg->origin), SRCLOC_COLUMN(msg->origin), msg->message);
         ++errors;
     }
     if (warnings + errors > 0)
@@ -175,14 +175,12 @@ int main(int argc, char *argv[])
     {
         /* Print program back: */
         ast_print(ast, stdout, 80, arg_debug);
-        ast_free(ast);
     }
     else
     {
         /* Execute program: */
         vm_init();
         vm_load(ast);
-        ast_free(ast);
         if (arg_object == NULL)
         {
             FILE *fp_input = stdin, *fp_output = stdout;
@@ -227,6 +225,6 @@ int main(int argc, char *argv[])
         }
         vm_fini();
     }
-
+    ast_free(ast);
     return 0;
 }

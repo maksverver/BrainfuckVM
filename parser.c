@@ -19,16 +19,16 @@ static void append_message(
 {
     ParseMessage *msg = malloc(sizeof(ParseMessage));
     assert(msg != NULL);
-    msg->next    = NULL;
-    msg->line    = line;
-    msg->column  = column;
+    msg->next = NULL;
+    msg->origin = SRCLOC(line, column);
     msg->message = strdup(message);
     assert(msg->message != NULL);
     **end = msg;
     *end = &msg->next;
 }
 
-static void emit(struct AstNode *temp, struct AstNode ***end, int new_type)
+static void emit(struct AstNode *temp, struct AstNode ***end,
+                 int new_type, const ParseState *ps)
 {
     struct AstNode *copy;
 
@@ -38,10 +38,10 @@ static void emit(struct AstNode *temp, struct AstNode ***end, int new_type)
         **end = copy;
         *end = &copy->next;
     }
-    temp->next  = NULL;
-    temp->child = NULL;
-    temp->type  = new_type;
-    temp->value = 0;
+    memset(temp, 0, sizeof(*temp));
+    temp->type = new_type;
+    temp->origin.begin = SRCLOC(ps->line + 1, ps->column);
+    temp->origin.end = temp->origin.begin;
 }
 
 /* Parses characters from `fp' until EOF or a closing ] instruction, or, if
@@ -57,9 +57,10 @@ static void emit(struct AstNode *temp, struct AstNode ***end, int new_type)
 static AstNode *parse(ParseState *ps)
 {
     struct AstNode *begin = NULL, **end = &begin;
-    struct AstNode node = { NULL, NULL, OP_NONE, 0, 0, 0, NULL };
+    struct AstNode node;
     int c;
 
+    memset(&node, 0, sizeof(node));
     for (;;)
     {
         if (ps->fp != NULL) c = getc(ps->fp);
@@ -71,10 +72,11 @@ static AstNode *parse(ParseState *ps)
         switch (c)
         {
         case '[':
-            emit(&node, &end, OP_LOOP);
+            emit(&node, &end, OP_LOOP, ps);
             ++ps->depth;
             node.child = parse(ps);
             --ps->depth;
+            node.origin.end = SRCLOC(ps->line + 1, ps->column);
             break;
 
         case ']':
@@ -83,44 +85,52 @@ static AstNode *parse(ParseState *ps)
                                "ignored unmatched closing bracket");
                 break;
             }
-            emit(&node, &end, OP_NONE);
+            emit(&node, &end, OP_NONE, ps);
             return begin;
 
         case '+':
             if (node.type != OP_ADD || node.value < 0) {
-                emit(&node, &end, OP_ADD);
+                emit(&node, &end, OP_ADD, ps);
+            } else {
+                node.origin.end = SRCLOC(ps->line + 1, ps->column);
             }
             ++node.value;
             break;
 
         case '-':
             if (node.type != OP_ADD || node.value > 0) {
-                emit(&node, &end, OP_ADD);
+                emit(&node, &end, OP_ADD, ps);
+            } else {
+                node.origin.end = SRCLOC(ps->line + 1, ps->column);
             }
             --node.value;
             break;
 
         case '>':
             if (node.type != OP_MOVE || node.value < 0) {
-                emit(&node, &end, OP_MOVE);
+                emit(&node, &end, OP_MOVE, ps);
+            } else {
+                node.origin.end = SRCLOC(ps->line + 1, ps->column);
             }
             ++node.value;
             break;
 
         case '<':
             if (node.type != OP_MOVE || node.value > 0) {
-                emit(&node, &end, OP_MOVE);
+                emit(&node, &end, OP_MOVE, ps);
+            } else {
+                node.origin.end = SRCLOC(ps->line + 1, ps->column);
             }
             --node.value;
             break;
 
         case ',':
-            emit(&node, &end, OP_CALL);
+            emit(&node, &end, OP_CALL, ps);
             node.value = CB_READ;
             break;
 
         case '.':
-            emit(&node, &end, OP_CALL);
+            emit(&node, &end, OP_CALL, ps);
             node.value = CB_WRITE;
             break;
 
@@ -130,7 +140,7 @@ static AstNode *parse(ParseState *ps)
                 append_message(&ps->warnings, ps->line + 1, ps->column,
                                "closed unmatched opening bracket");
             }
-            emit(&node, &end, OP_NONE);
+            emit(&node, &end, OP_NONE, ps);
             return begin;
 
         case '\n':
@@ -140,7 +150,7 @@ static AstNode *parse(ParseState *ps)
         }
 
         if (c == ps->debug) {
-            emit(&node, &end, OP_CALL);
+            emit(&node, &end, OP_CALL, ps);
             node.value = CB_DEBUG;
         }
     }

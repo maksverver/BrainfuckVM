@@ -76,12 +76,15 @@ static void pass2(AstNode **p)
 static AstNode *pass3_collapse(AstNode *p)
 {
     AstNode *n, *node;
+    SourceSpan origin;
     int begin, end, pos;
 
     /* Determine bounds: */
+    origin.begin = p->origin.begin;
     begin = 0, end = 1, pos = 0;
     for (n = p; n != NULL; n = n->next)
     {
+        if (n->next == NULL) origin.end = n->origin.end;
         if (n->type != OP_MOVE) continue;
         pos += n->value;
         if (pos >= end) end = pos + 1;
@@ -91,13 +94,14 @@ static AstNode *pass3_collapse(AstNode *p)
     /* Initialize complex node structure: */
     node = malloc(sizeof(AstNode) + (end - begin));
     assert(node != NULL);
-    node->next  = NULL;
-    node->child = NULL;
-    node->type  = OP_ADD_MOVE;
-    node->value = pos;
-    node->begin = begin;
-    node->end   = end;
-    node->add   = (signed char*)node + sizeof(AstNode);
+    node->next   = NULL;
+    node->child  = NULL;
+    node->type   = OP_ADD_MOVE;
+    node->value  = pos;
+    node->origin = origin;
+    node->begin  = begin;
+    node->end    = end;
+    node->add    = (signed char*)node + sizeof(AstNode);
     memset(node->add, 0, end - begin);
     node->add -= begin;
 

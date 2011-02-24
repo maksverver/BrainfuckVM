@@ -6,7 +6,7 @@
 
 typedef struct ParseMessage {
     struct ParseMessage *next;      /* link to next message */
-    int line, column;               /* 1-based line/column */
+    SourceLocation origin;          /* origin of error */
     char *message;                  /* human-readable message */
 } ParseMessage;
 

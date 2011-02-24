@@ -18,10 +18,12 @@ AstNode *ast_clone(AstNode *node)
     assert(copy != NULL);
 
     /* Clone/copy fields: */
-    copy->next  = ast_clone(node->next);
-    copy->child = ast_clone(node->child);
-    copy->type  = node->type;
-    copy->value = node->value;
+    copy->next   = ast_clone(node->next);
+    copy->child  = ast_clone(node->child);
+    copy->type   = node->type;
+    copy->value  = node->value;
+    copy->code   = node->code;
+    copy->origin = node->origin;
 
     return copy;
 }
@@ -35,4 +37,29 @@ void ast_free(AstNode *node)
         free(node);
         node = next;
     }
+}
+
+static void print(FILE *fp, const AstNode *node, int depth)
+{
+    static const char *types[6] = {
+        "NONE", "LOOP", "ADD", "MOVE", "CALL", "ADD_MOVE" };
+    int d;
+
+    while (node != NULL)
+    {
+        for (d = 0; d < depth; ++d) fputc('\t', fp);
+        fprintf(fp, "%s %d origin=[%d:%d,%d:%d] code=[%llxh,%llxh)\n",
+            (unsigned)node->type < 6 ? types[node->type] : "<INVALID>",
+            node->value,
+            SRCLOC_LINE(node->origin.begin), SRCLOC_COLUMN(node->origin.begin),
+            SRCLOC_LINE(node->origin.end), SRCLOC_COLUMN(node->origin.end),
+            (long long)node->code.begin, (long long)node->code.end);
+        print(fp, node->child, depth + 1);
+        node = node->next;
+    }
+}
+
+void ast_debug_dump(FILE *fp, const AstNode *root)
+{
+    print(fp, root, 0);
 }
