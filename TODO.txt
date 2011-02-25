@@ -1,3 +1,5 @@
+ - support reading code + input separated by ! from a single file/stdin
+
  - create test cases that cover all the possible optimizations and code
    generation scenario's.
 

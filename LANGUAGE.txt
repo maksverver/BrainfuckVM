@@ -38,7 +38,7 @@ default.  The -z option allows this behaviour to be changed to writing a
 specific value to the cell when reading fails.  Note that failure includes
 both end-of-file and true reading errors.
 
-The -d option causes the interpreter to recognize a special character ('!' by
+The -d option causes the interpreter to recognize a special character ('#' by
 default) as a command to break into the built-in debugger.
 
 The interpreter warns about but accepts source code with non-matching brackets.

@@ -51,7 +51,7 @@ the following equivalence:
 
     < >     MOVE <x>: add <x> to the tape head, similar to above.
 
-    , . !   CALL <x>: generate call to callback function
+    , . #   CALL <x>: generate call to callback function
 
 Without further optimizations, these are compiled into assembly as follows
 (giving x86_64 assembly only; IA-32 assembly is similar):

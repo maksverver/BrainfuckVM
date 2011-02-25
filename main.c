@@ -71,7 +71,7 @@ static void parse_args(int argc, char *argv[])
             break;
 
         case 'd':
-            arg_debug = optarg ? optarg[0] : '!';
+            arg_debug = optarg ? optarg[0] : '#';
             break;
 
         case 'e':
