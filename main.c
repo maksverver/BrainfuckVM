@@ -16,7 +16,8 @@ static const char   *arg_output_path = NULL;
 static int          arg_wrap_check   = 0;
 static int          arg_optimize     = 0;
 static int          arg_debug        = -1;
-static int          arg_print        = 0;
+static int          arg_print_code   = 0;
+static int          arg_print_tree   = 0;
 static const char   *arg_object      = NULL;
 static size_t       arg_mem_limit    = (size_t)-1;
 static int          arg_eof_value    = -1;
@@ -34,6 +35,7 @@ static void exit_usage(void)
         "\t-m <size> tape memory limit (K, M or G suffix recognized)\n"
         "\t-o <path> write output to file at <path> instead of standard output\n"
         "\t-p        print compact code (don't execute)\n"
+        "\t-t        print program tree (don't execute)\n"
         "\t-w        break to debugger when value wraps around\n"
         "\t-z <val>  value written to cell when reading fails\n" );
     exit(0);
@@ -56,7 +58,7 @@ static size_t parse_size(const char *arg)
 static void parse_args(int argc, char *argv[])
 {
     int c;
-    while ((c = getopt(argc, argv, "Oc:d::e:i:m:o:pwz:")) >= 0)
+    while ((c = getopt(argc, argv, "Oc:d::e:i:m:o:ptwz:")) >= 0)
     {
         switch (c)
         {
@@ -89,7 +91,11 @@ static void parse_args(int argc, char *argv[])
             break;
 
         case 'p':
-            arg_print = 1;
+            arg_print_code = 1;
+            break;
+
+        case 't':
+            arg_print_tree = 1;
             break;
 
         case 'w':
@@ -171,10 +177,21 @@ int main(int argc, char *argv[])
     if (arg_wrap_check) vm_set_wrap_check(arg_wrap_check);
     if (arg_optimize) ast = optimize(ast);
 
-    if (arg_print)
+    if (arg_print_code || arg_print_tree)
     {
-        /* Print program back: */
-        ast_print(ast, stdout, 80, arg_debug);
+        if (arg_print_code)
+        {
+            /* Print program back: */
+            ast_print(ast, stdout, 80, arg_debug);
+        }
+        if (arg_print_tree)
+        {
+            /* Load code, then print annotated AST */
+            vm_init();
+            vm_load(ast);
+            ast_print_tree(ast, stdout);
+            vm_fini();
+        }
     }
     else
     {

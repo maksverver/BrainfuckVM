@@ -39,7 +39,7 @@ void ast_free(AstNode *node)
     }
 }
 
-static void print(FILE *fp, const AstNode *node, int depth)
+static void print_tree(const AstNode *node, int depth, FILE *fp)
 {
     static const char *types[6] = {
         "NONE", "LOOP", "ADD", "MOVE", "CALL", "ADD_MOVE" };
@@ -54,12 +54,12 @@ static void print(FILE *fp, const AstNode *node, int depth)
             SRCLOC_LINE(node->origin.begin), SRCLOC_COLUMN(node->origin.begin),
             SRCLOC_LINE(node->origin.end), SRCLOC_COLUMN(node->origin.end),
             (long long)node->code.begin, (long long)node->code.end);
-        print(fp, node->child, depth + 1);
+        print_tree(node->child, depth + 1, fp);
         node = node->next;
     }
 }
 
-void ast_debug_dump(FILE *fp, const AstNode *root)
+void ast_print_tree(const AstNode *root, FILE *fp)
 {
-    print(fp, root, 0);
+    print_tree(root, 0, fp);
 }

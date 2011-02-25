@@ -212,6 +212,12 @@ static void gen_loop_code(AstNode *node)
     size_t start, size;
     int gen1, gen2, dist1, dist2, size1, size2;
 
+    /* Note that we never generate unconditional jumps, even if call_value is
+       known, because these correspond with either unreachable loop bodies
+       (which are removed by the optimizer) or infinite loops (which do not
+       occur except at the top level in sensible programs), so there is
+       practically nothing to be gained from handling this case specially. */
+
     size1 = zf_valid ? 0 : 3;
     gen1  = (cell_value == 1) ? 0 : 1;
 
@@ -360,15 +366,16 @@ static int gen_special_loop_code(AstNode *child)
     if (num_bits > 0)
     {
         int bit;
-
-        static const char text[] = { 0x8a, 0x08 };  /* movb (%rax), %cl */
+        static const char text[] = {
+            LONGPREFIX 0x0f, 0xb6, 0x08 };  /* movzbq (%rax), %rcx */
         cb_append(&code, text, sizeof(text));
 
         for (bit = 0; bit < num_bits; ++bit)
         {
             if (bit > 0)
             {
-                static const char text[] = { 0x00, 0xc9 };  /* addb %bl, %cl */
+                static const char text[] = {
+                    LONGPREFIX 0x01, 0xc9 };   /* addb %cl, %cl */
                 cb_append(&code, text, sizeof(text));
             }
             for (pos = child->begin; pos < child->end; ++pos)
@@ -563,7 +570,7 @@ static void gen_code(AstNode *node)
                     cell_value = -1;  /* head moved */
                 }
                 else
-                if (node->add[node->value] != 0) 
+                if (node->add[node->value] != 0)
                 {
                     cell_value = (cell_value == 0) ? 1 : -1;  /* cell changed */
                 }  /* else: head and cell value unchanged */
@@ -593,7 +600,7 @@ static void gen_func(AstNode *ast)
 
     static const char epilogue[] = {
         0x5b,                   /* popq %rbx */
-        0x5d,                   /* popq %ebp */
+        0x5d,                   /* popq %rbp */
         0xc3 };                 /* ret */
 
     /* cell_value keeps track of the value in the cell under the tape head

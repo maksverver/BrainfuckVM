@@ -12,56 +12,119 @@ returns the final position of the tape head.
 
 The callback function takes the current tape head as an argument and returns a
 new tape head value (which may be changed when the debugger is triggered; the
-read and write calls do not change the head's position).
+read and write calls do not change the head's position). The second argument
+determines the functionality to be accessed:
 
-Inside the function, the EAX/RAX register is used to store the tape head. The
-callbacks pointer is stored in EBX/RBX (since this register is preserved over
-function calls). CL is used to temporary store cell values.
+    0   read a byte (,)
+    1   write a byte (.)
+    2   debug breakpoint hit
+    3   cell value wrapped
+
+The generated code asssumes the A-register (EAX or RAX depending on the
+architecture) is used to store the tape head (as a pointer into tape memory)
+and the B-register (EBX or RBX) stores the callback function (which is
+convenient since the B-register is preserved across function calls).
+
+Other registers can be used for temporary storage. In practice, only the
+C-register is used.
 
 Bounds checking is done only implicitly, by surrounding the allocated tape
 memory with inaccessible pages which will trigger a page fault when read or
-written. To  ensure memory errors are detected, the code generator ensures the
-tape is accessed at positions of at most a pagesize apart. (For example, if the
-tape head has to move two pagesizes to the right, the code generator will
-generate an extra instruction to read a byte after one pagesize, to trigger a
-page fault if the movement would exceed the tape memory.) Therefore, page faults
-are guaranteed to occur in one of the two pages at the ends of the array.
+written.  To guarantee that memory errors are detected, the code generator
+ensures the tape is accessed at positions of at most a pagesize apart. (For
+example, if the tape head has to move two pagesizes to the right, the code
+generator will generate an extra instruction to read a byte after one pagesize,
+to trigger a page fault if the movement would exceed the tape memory.)
+Therefore, page faults are guaranteed to occur in one of the two pages at the
+ends of the array.
+
+A program is parsed by collapsing consecutive characters into a single
+operation.  The program is first parsed into an abstract syntax tree, using
+the following equivalence:
+
+    [ ]     LOOP: the only AST node with children, which are the operations
+                  inside the loop, while the current cell is nonzero.
+
+    + -     ADD <x>: add <x> to the current cell, where <x> is the number of
+            consecutive + operations (and analogous for - operations, but then
+            x is negative).
+
+    < >     MOVE <x>: add <x> to the tape head, similar to above.
+
+    , . !   CALL <x>: generate call to callback function
+
+Without further optimizations, these are compiled into assembly as follows
+(giving x86_64 assembly only; IA-32 assembly is similar):
+
 
 Function prologue:
 
-    pushq   %rbx            # 53
-    movq    %rdi, %rax      # 48 89 f8
-    movq    %rsi, %rbx      # 48 89 f3
+    push %rbp          # save caller's base pointer
+    movq %rsp, %rbp    # create stack frame
+    pushq %rbx         # save caller's b-register
+    movq %rdi, %rax    # tape head in a-register
+    movq %rsi, %rbx    # callback function pointer in b-register
 
-Function epilogue:
+Fuction epilogue:
 
-    test    $0, (%rax)      # f6 00 00     force page fault when out-of-bounds
-    popq    %rbx            # 5b
-    ret                     # c3
+    popq %rbx          # restore caller's b-register
+    popq %rbp          # restore caller's base pointer
+    ret                # return (tape head in a-register)
 
-Loop code: (parts of which can be optimized away by the peephole optimizer)
 
-    cmpb $0, (%rax)         # 80 38 00
-    jz b                    # 74 xx             if offset < 128
-                            # 0f 84 xx xx xx xx otherwise
-a:
-    # .. code inside loop goes here ..
+LOOP:
+        cmpb $0, (%rax)
+        jz b
+    a:
+        .. code generated for children ..
+    b:
+        cmpb $0, (%rax)
+        jnz a
 
-    cmpb $0, (%rax)         # 80 38 00
-    jnz a                   # 75 xx             if offset > -129
-                            # 0f 85 xx xx xx xx otherwise
-b:
+ADD <x>:
+    if x > 0:
+        addb x, (%rax)
 
-ADD<value> opcode:
-    addb $<value>, (%rax)   # 80 00 xx
+    if x < 0:
+        subb -x, (%rax)
 
-MOVE<dist> opcode:
-    addq $<dist>, %rax      # 48 83 c0 xx       if -128 <= dist< 128
-                            # 48 05 xx xx xx xx otherwise
+    if x != 0 and wrap checking is enabled:
+        jnc b:
+        movq %rax, %rdi
+        movq $3, %esi
+        call %*ebx
+    b:
 
-CALL<func> opcode:
-    movq  %rax, %rdi        # 48 89 c7
-    call  <offset>(%rbx)    # ff 13             if func == 0
-                            # ff 53 xx          otherwise
+MOVE <x>:
 
-NOTE: this document is incomplete.
+    while x >= pagesize:
+        addq pagesize, %rax
+        testb $0, (%rax)
+        x -= pagesize
+
+    while x <= -pagesize:
+        addq -pagesize, %rax
+        testb $0, (%rax)
+        x += pagesize
+
+    if x != 0:
+        addq x, %rax
+
+CALL <x>:
+        movq %rax, %rdi
+        movq x, %esi
+        call %*ebx
+
+The code generator includes a peephole optimizer that tracks:
+    1. whether the zero-flag is currently valid with respect to the current cell
+    2. whether the current cell is currently known to be zero or nonzero
+
+This information is used to optimize the loop code, by eliminating either the
+cmp instruction (if the zero-flag is valid), or both the cmp instruction and
+the conditional jump (if the zero-status of the current cell is known).
+
+Furthermore, the VM uses an optimization pass that combines consecutive ADD
+and MOVE instructions into a single ADD_MOVE instruction. Special code is
+generated for LOOP-nodes with a single ADD_MOVE-node, and for ADD_MOVE-nodes.
+TODO: document!
+
