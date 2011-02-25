@@ -27,6 +27,8 @@
 static AstNode *program;
 static int pagesize;
 static struct sigaction oldact_sigsegv;
+static struct sigaction oldact_sigint;
+static int interrupted;
 static Cell *tape;
 static size_t tape_size;            /* in bytes */
 static size_t max_tape_size;        /* in bytes */
@@ -63,7 +65,6 @@ static void range_check(Cell *cell, Cell **head)
     {
         fprintf(stderr, "tape head exceeds left bound!\n");
         debug_break(head, program, find_offset());
-        exit(1);
     }
     if (cell >= tape + tape_size)
     {
@@ -72,59 +73,72 @@ static void range_check(Cell *cell, Cell **head)
     }
 }
 
-static Cell *vm_read(Cell *head)
-{
-    int c;
-    range_check(head, &head);
-    if ((c = getc(input)) != EOF) *head = c;
-    else if (eof_value >= 0) *head = (Cell)eof_value;
-    return head;
-}
-
-static Cell *vm_write(Cell *head)
+static Cell *vm_callback(Cell *head, int request)
 {
     range_check(head, &head);
-    putc(*head, output);
+    switch (request)
+    {
+    case CB_READ:
+        {
+            int ch = getc(input);
+            *head = (ch != EOF) ? ch : (eof_value >= 0) ? eof_value : *head;
+        } break;
+
+    case CB_WRITE:
+        putc(*head, output);
+        break;
+
+    case CB_WRAPPED:
+        fprintf(stderr, "cell value wrapped around!\n");
+    case CB_DEBUG:
+        debug_break(&head, program, find_offset());
+        break;
+    }
+    if (interrupted)
+    {
+        debug_break(&head, program, find_offset());
+        interrupted = 0;
+    }
     return head;
 }
-
-static Cell *vm_debug(Cell *head)
-{
-    range_check(head, &head);
-    debug_break(&head, program, find_offset());
-    return head;
-}
-
-static Cell *vm_wrapped(Cell *head)
-{
-    fprintf(stderr, "cell value wrapped around!\n");
-    return vm_debug(head);
-}
-
-VM_Callback vm_callbacks[CB_COUNT] = {
-    &vm_read, &vm_write, &vm_debug, &vm_wrapped };
 
 static void sigsegv_handler(int signum, siginfo_t *info, void *ucontext_arg)
 {
     ucontext_t *uc = (ucontext_t*)ucontext_arg;
-    char *ip;
-    Cell *head;
+    char *ip = (char*)uc->uc_mcontext.gregs[IP];
+    Cell *head = (Cell*)uc->uc_mcontext.gregs[HEAD];
 
     if (signum != SIGSEGV) return;
 
-    ip = (char*)uc->uc_mcontext.gregs[IP];
     if (ip < code.data || ip >= code.data + code.size)
-    {
-        /* Segmentation fault occured outside of generated program code: */
+    {   /* Segmentation fault occured outside of generated program code: */
         fprintf(stderr, "segmentation fault occured!\n");
         abort();
     }
 
     /* Range check on error address, update RAX and restart: */
-    head = (Cell*)uc->uc_mcontext.gregs[HEAD];
     range_check((Cell*)info->si_addr, &head);
     uc->uc_mcontext.gregs[HEAD] = (greg_t)head;
-    return;
+}
+
+static void sigint_handler(int signum, siginfo_t *info, void *ucontext_arg)
+{
+    ucontext_t *uc = (ucontext_t*)ucontext_arg;
+    char *ip = (char*)uc->uc_mcontext.gregs[IP];
+    Cell *head = (Cell*)uc->uc_mcontext.gregs[HEAD];
+
+    if (signum != SIGINT) return;
+
+    if (ip >= code.data && ip < code.data + code.size)
+    {   /* Interrupted generated code; call debugger immediately: */
+        debug_break(&head, program, find_offset());
+        uc->uc_mcontext.gregs[HEAD] = (greg_t)head;
+        interrupted = 0;
+    }
+    else
+    {   /* Generated code not active; signal callback. */
+        interrupted = 1;
+    }
 }
 
 static void gen_bound_check(void)
@@ -412,31 +426,22 @@ static int gen_special_loop_code(AstNode *child)
     return 1;
 }
 
-static void gen_call(int index)
+static void gen_call(int request)
 {
+    char text[] = {
 #if __x86_64
-    char text[] = { LONGPREFIX 0x89, 0xc7 };  /* movq  %rax, %rdi */
+        LONGPREFIX 0x89, 0xc7,         /* movq  %rax, %rdi */
+        0xbe, (char)request, 0, 0, 0,  /* mov <request>, %esi */
+        0xff, 0xd3                     /* call *%ebx */
 #elif __i386
-    char text[] = { 0x50 };                   /* pushl %eax */
+        0x6a, (char)request,    /* push <request> */
+        0x50,                   /* pushl %eax */
+        0xff, 0xd3,             /* call *%ebx */
+        0x5a,                   /* pop edx */
+        0x59                    /* pop ecx */
 #endif
+    };
     cb_append(&code, text, sizeof(text));
-    assert(index >= 0 && index < CB_COUNT);
-    if (index == 0)
-    {   /* call *(%rbx) */
-        static const char text[] = { 0xff, 0x13 };
-        cb_append(&code, text, sizeof(text));
-    }
-    else
-    {   /* call *<offset>(%rbx) */
-        char text[] = { 0xff, 0x53, sizeof(void*)*index };
-        cb_append(&code, text, sizeof(text));
-    }
-#if __i386
-    {
-        char text[] = { 0x83, 0xc4, 0x04 };   /* addl $4, %esp */
-        cb_append(&code, text, sizeof(text));
-    }
-#endif
     cell_value = -1;
     zf_valid   =  0;
 }
@@ -665,12 +670,16 @@ static void vm_alloc(size_t size)
 
 void vm_init(void)
 {
-    struct sigaction sigact_sigsegv;
+    struct sigaction sigact;
+
+    sigact.sa_flags = SA_SIGINFO;
+    sigact.sa_sigaction = &sigsegv_handler;
+    sigemptyset(&sigact.sa_mask);
+    sigaction(SIGSEGV, &sigact, &oldact_sigsegv);
+    sigact.sa_sigaction = &sigint_handler;
+    sigaction(SIGINT, &sigact, &oldact_sigint);
+
     pagesize = getpagesize();
-    sigact_sigsegv.sa_flags     = SA_SIGINFO;
-    sigact_sigsegv.sa_sigaction = &sigsegv_handler;
-    sigemptyset(&sigact_sigsegv.sa_mask);
-    sigaction(SIGSEGV, &sigact_sigsegv, &oldact_sigsegv);
     cb_create(&code);
     assert(CB_COUNT < 32);
     max_tape_size = 0;
@@ -723,12 +732,14 @@ void vm_set_wrap_check(int val)
 void vm_exec(void)
 {
     Cell *head = tape;
-    head = ((Cell *(*)(Cell*, VM_Callback*))code.data)(head, vm_callbacks);
+    interrupted = 0;
+    ((Cell *(*)(Cell*, VM_Callback))code.data)(head, &vm_callback);
 }
 
 void vm_fini(void)
 {
     sigaction(SIGSEGV, &oldact_sigsegv, NULL);
+    sigaction(SIGINT, &oldact_sigint, NULL);
     vm_free();
     cb_destroy(&code);
 }

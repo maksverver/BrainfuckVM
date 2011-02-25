@@ -5,13 +5,14 @@ Callback functions take
 
 The Brainfuck program is a function with prototype:
 
-    char *bfmain(char *head, char *(callbacks[3])(char *));
+    char *bfmain(char *head, char *(*callback)(char *, int));
 
 This function takes the starting position of the tape head as an argument and
 returns the final position of the tape head.
 
-Every callback takes the current tape head as an argument and returns a new
-tape head value. (In practice, none of the callbacks move the tape head.)
+The callback function takes the current tape head as an argument and returns a
+new tape head value (which may be changed when the debugger is triggered; the
+read and write calls do not change the head's position).
 
 Inside the function, the EAX/RAX register is used to store the tape head. The
 callbacks pointer is stored in EBX/RBX (since this register is preserved over

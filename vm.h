@@ -7,9 +7,7 @@
 
 typedef unsigned char Cell;
 
-typedef Cell *(*VM_Callback)(Cell *tape);
-
-extern VM_Callback vm_callbacks[CB_COUNT];
+typedef Cell *(*VM_Callback)(Cell *tape, int operation);
 
 extern void vm_init(void);
 extern void vm_load(AstNode *ast);

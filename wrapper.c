@@ -1,38 +1,33 @@
 /* This file contains sample wrapper code that can be compiled and linked
    against an object file produced by the JIT compiler. The Brainfuck program
    is in a function called bfmain() that takes two arguments: a pointer to the
-   start of the blank tape, and an array of function pointers that are used to
-   call I/O functions. */
+   start of the blank tape, and a callback function used for I/O. */
 
 #include <stdio.h>
 
-typedef char Cell;
-typedef Cell *(*Callback)(Cell *);
+extern char *bfmain(char *tape, char *(*callback)(char *, int));
 
-extern Cell *bfmain(Cell *tape, Callback callbacks[3]);
+static char tape[1<<16];
 
-static Cell *read(Cell *head)
+static char *callback(char *head, int request)
 {
-    int c = getchar();
-    if (c != EOF) *head = c;
-    return head;
-}
+    switch (request)
+    {
+    case 0:  /* read */
+        {
+            int ch = getchar();
+            if (ch != EOF) *head = ch;
+        } break;
 
-static Cell *write(Cell *head)
-{
-    putchar(*head);
-    return head;
-}
-
-static Cell *dummy(Cell *head)
-{
+    case 1:  /* write */
+        putchar(*head);
+        break;
+    }
     return head;
 }
 
 int main()
 {
-    static Callback callbacks[3] = { read, write, dummy, dummy };
-    static Cell tape[1<<16] = { 0 };
-    bfmain(tape, callbacks);
+    bfmain(tape, callback);
     return 0;
 }

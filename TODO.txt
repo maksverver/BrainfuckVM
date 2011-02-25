@@ -1,5 +1,3 @@
- - break to debugger on Ctrl-C (only if executing inside the Brainfuck code!)
-
  - create test cases that cover all the possible optimizations and code
    generation scenario's.
 
