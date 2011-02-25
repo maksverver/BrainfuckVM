@@ -109,7 +109,7 @@ static void parse_args(int argc, char *argv[])
             assert(0);  /* unhandled option. should not happen! */
         }
     }
-    if (optind < argc)
+    if (arg_source == NULL && optind < argc)
     {
         arg_source_path = argv[optind++];
     }
