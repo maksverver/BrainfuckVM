@@ -108,7 +108,7 @@ static void sigsegv_handler(int signum, siginfo_t *info, void *ucontext_arg)
     char *ip = (char*)uc->uc_mcontext.gregs[IP];
     Cell *head = (Cell*)uc->uc_mcontext.gregs[HEAD];
 
-    if (signum != SIGSEGV) return;
+    if (signum != SIGSEGV) abort();
 
     if (ip < code.data || ip >= code.data + code.size)
     {   /* Segmentation fault occured outside of generated program code: */
@@ -127,7 +127,9 @@ static void sigint_handler(int signum, siginfo_t *info, void *ucontext_arg)
     char *ip = (char*)uc->uc_mcontext.gregs[IP];
     Cell *head = (Cell*)uc->uc_mcontext.gregs[HEAD];
 
-    if (signum != SIGINT) return;
+    (void)info; /* unused */
+
+    if (signum != SIGINT) abort();
 
     if (ip >= code.data && ip < code.data + code.size)
     {   /* Interrupted generated code; call debugger immediately: */
@@ -437,8 +439,7 @@ static void gen_call(int request)
         0x6a, (char)request,    /* push <request> */
         0x50,                   /* pushl %eax */
         0xff, 0xd3,             /* call *%ebx */
-        0x5a,                   /* pop edx */
-        0x59                    /* pop ecx */
+        0x83, 0xc4, 0x08        /* addl $8, %esp */
 #endif
     };
     cb_append(&code, text, sizeof(text));
