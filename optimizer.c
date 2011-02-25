@@ -12,12 +12,16 @@ static void drop(AstNode **p)
 }
 
 /* Recursive optimization, that:
-    1. discards loops that will never be entered, i.e.
+    1. collapses consecutive move operations into one.
+    2. collapses consecutive add operations into one.
+    3. discards loops that will never be entered, i.e.
         - at the start of the program
         - immediately following another loop
-    2. collapses consecutive move operations into one.
-    3. collapses consecutive add operations into one. */
-static void pass1(AstNode **p, int cell)
+    4. discards code after provably unterminating loops
+
+   Takes a cell value at the start, and returns a cell value at exit, which
+   is either 0 (zero), 1 (nonzero) or -1 (unknown). */
+static int pass1(AstNode **p, int cell)
 {
     while (*p != NULL)
     {
@@ -39,10 +43,22 @@ static void pass1(AstNode **p, int cell)
                     drop(p);
                     continue;
                 }
-            }
 
-            /* Non-loop operation makes cell value unknown: */
-            cell = -1;
+                if ((*p)->type == OP_MOVE)
+                {
+                    cell = -1;
+                }
+                else  /* (*p)->type == OP_ADD */
+                {
+                    cell = (cell == 0) ? 1 : -1;
+                }
+            }
+            else
+            {
+                /* Other operation makes cell value unknown: */
+                assert((*p)->type == OP_CALL);
+                cell = -1;
+            }
         }
         else  /* (*p)->type == OP_LOOP */
         {
@@ -51,12 +67,27 @@ static void pass1(AstNode **p, int cell)
                 drop(p);
                 continue;
             }
-            pass1(&(*p)->child, 1);
-            cell = 0;  /* cell will be zero after loop */
+            else
+            {
+                int end = pass1(&(*p)->child, 1);
+                if (cell == 1 && end == 1)
+                {
+                    /* Infinite loop detected! */
+                    ast_free((*p)->next);
+                    (*p)->next = NULL;
+                    cell = 1;
+                }
+                else
+                {
+                    /* After loop, cell will be zero. */
+                    cell = 0;
+                }
+            }
         }
 
         p = &(*p)->next;
     }
+    return cell;
 }
 
 /* Top-level optimization that removes all code after the last loop (which
@@ -123,9 +154,8 @@ static AstNode *pass3_collapse(AstNode *p)
     return node;
 }
 
-/* Recursive optimization that collapses consecutive move/add sequences of
-   three or more operations into a single AddMove expression, in order to
-   allow more efficient code to be generated. */
+/* Recursive optimization that collapses consecutive move/add sequences into a
+   single AddMove expression, to allow more efficient code to be generated. */
 static void pass3(AstNode **p)
 {
     while (*p != NULL)
