@@ -143,10 +143,10 @@ static void sigint_handler(int signum, siginfo_t *info, void *ucontext_arg)
     }
 }
 
-static void gen_bound_check(void)
+static void check_head(void)
 {
-    /* testb $0, (%rax) */
-    static const char text[] = { 0xf6, 0x00, 0x00 };
+    /* cmpb $0, (%rax) */
+    static const char text[] = { 0x80, 0x38, 0x00 };
     cb_append(&code, text, sizeof(text));
 }
 
@@ -164,7 +164,7 @@ static void gen_move(int dist)
     {
         do {
             gen_large_move(pagesize);
-            gen_bound_check();
+            check_head();
             dist -= pagesize;
         } while (dist > pagesize);
     }
@@ -173,7 +173,7 @@ static void gen_move(int dist)
     {
         do {
             gen_large_move(-pagesize);
-            gen_bound_check();
+            check_head();
             dist += pagesize;
         } while (dist < -pagesize);
     }
@@ -333,6 +333,83 @@ static void gen_loop_code(AstNode *node)
     }
 }
 
+static void gen_call(int request)
+{
+    char text[] = {
+#if __x86_64
+        LONGPREFIX 0x89, 0xc7,         /* movq  %rax, %rdi */
+        0xbe, (char)request, 0, 0, 0,  /* mov <request>, %esi */
+        0xff, 0xd3                     /* call *%ebx */
+#elif __i386
+        0x6a, (char)request,    /* push <request> */
+        0x50,                   /* pushl %eax */
+        0xff, 0xd3,             /* call *%ebx */
+        0x83, 0xc4, 0x08        /* addl $8, %esp */
+#endif
+    };
+    cb_append(&code, text, sizeof(text));
+    cell_value = -1;
+    zf_valid   =  0;
+}
+
+static void check_wrap(int keep_zf, int conditional)
+{
+    int start = code.size;
+    gen_call(CB_WRAPPED);
+    if (keep_zf) check_head();
+    if (conditional)
+    {   /* jnc <dist> */
+        const char text[] = { 0x73, code.size - start };
+        cb_insert(&code, text, sizeof(text), start);
+    }
+}
+
+static void gen_add(int offset, int value)
+{
+    if (value >= 0)
+    {
+        if (offset == 0)
+        {   /* addb <value>, (%rax) */
+            char text[] = { 0x80, 0x00, value };
+            cb_append(&code, text, sizeof(text));
+        }
+        else
+        if (offset >= -128 && offset < 128)
+        {   /* addb $<value>, <offset>(%rax) */
+            const char text[] = { 0x80, 0x40, offset, value };
+            cb_append(&code, text, sizeof(text));
+        }
+        else
+        {   /* addb $<value>, <offset>(%rax) */
+            const char text[] = { 0x80, 0x80,
+                offset, offset >> 8, offset >> 16, offset >> 24, value };
+            cb_append(&code, text, sizeof(text));
+        }
+    }
+    else  /* value < 0 */
+    {
+        if (offset == 0)
+        {
+            /* subb <-value>, (%rax) */
+            char text[] = { 0x80, 0x28, -value };
+            cb_append(&code, text, sizeof(text));
+        }
+        else
+        if (offset >= -128 && offset < 128)
+        {   /* subb $<value>, <offset>(%rax) */
+            const char text[] = { 0x80, 0x68, offset, -value };
+            cb_append(&code, text, sizeof(text));
+        }
+        else
+        {   /* subb $<value>, <offset>(%rax) */
+            const char text[] = { 0x80, 0xa8,
+                offset, offset >> 8, offset >> 16, offset >> 24, -value };
+            cb_append(&code, text, sizeof(text));
+        }
+    }
+    if (wrap_check) check_wrap(offset == 0, value > -256 && value < 256);
+}
+
 /* Generate special-case loop code when a loop contains only a single AddMove
    node and nothing else, does not (effectively) move the tape head, and the
    value of the tape head is decremented or incremented by one every iteration.
@@ -412,6 +489,11 @@ static int gen_special_loop_code(AstNode *child)
                             cb_append(&code, text, sizeof(text));
                         }
                     }
+                    else
+                    {
+                        continue;
+                    }
+                    if (wrap_check) check_wrap(0, 1);
                 }
             }
         }
@@ -435,25 +517,6 @@ static int gen_special_loop_code(AstNode *child)
     return 1;
 }
 
-static void gen_call(int request)
-{
-    char text[] = {
-#if __x86_64
-        LONGPREFIX 0x89, 0xc7,         /* movq  %rax, %rdi */
-        0xbe, (char)request, 0, 0, 0,  /* mov <request>, %esi */
-        0xff, 0xd3                     /* call *%ebx */
-#elif __i386
-        0x6a, (char)request,    /* push <request> */
-        0x50,                   /* pushl %eax */
-        0xff, 0xd3,             /* call *%ebx */
-        0x83, 0xc4, 0x08        /* addl $8, %esp */
-#endif
-    };
-    cb_append(&code, text, sizeof(text));
-    cell_value = -1;
-    zf_valid   =  0;
-}
-
 static void gen_code(AstNode *node)
 {
     for ( ; node != NULL; node = node->next)
@@ -471,28 +534,9 @@ static void gen_code(AstNode *node)
         case OP_ADD:
             if ((char)node->value != 0)
             {
-                if (node->value >= 0)
-                {   /* addb <value>, (%rax) */
-                    char text[] = { 0x80, 0x00, (char)node->value };
-                    cb_append(&code, text, sizeof(text));
-                }
-                else  /* node->value < 0 */
-                {   /* subb <-value>, (%rax) */
-                    char text[] = { 0x80, 0x28, (char)-node->value };
-                    cb_append(&code, text, sizeof(text));
-                }
+                gen_add(0, node->value);
                 cell_value = (cell_value == 0) ? 1 : -1;
                 zf_valid = 1;
-                if (wrap_check)
-                {
-                    int start = code.size;
-                    gen_call(CB_WRAPPED);
-                    if (node->value > -256 && node->value < 256)
-                    {   /* jnc <dist> */
-                        const char text[] = { 0x73, code.size - start };
-                        cb_insert(&code, text, sizeof(text), start);
-                    }
-                }
             }
             break;
 
@@ -504,7 +548,7 @@ static void gen_code(AstNode *node)
                 /* Test validity of head position between moves: */
                 if (node->next != NULL && node->next->type == OP_MOVE)
                 {
-                    gen_bound_check();
+                    check_head();
                 }
 
                 cell_value = -1;
@@ -528,25 +572,7 @@ static void gen_code(AstNode *node)
                 for (pos = node->begin; pos < node->end; ++pos)
                 {
                     if (pos == node->value || node->add[pos] == 0) continue;
-                    if (pos == 0)
-                    {   /* addb $<value>, (%rax) */
-                        const char text[] = { 0x80, 0x00, node->add[pos] };
-                        cb_append(&code, text, sizeof(text));
-                    }
-                    else
-                    if (pos >= -128 && pos < 128)
-                    {   /* addb $<value>, <pos>(%rax) */
-                        const char text[] = { 0x80, 0x40,
-                            pos, node->add[pos] };
-                        cb_append(&code, text, sizeof(text));
-                    }
-                    else
-                    {   /* addb $<value>, <pos>(%rax) */
-                        const char text[] = { 0x80, 0x80,
-                            pos, pos >> 8, pos >> 16, pos >> 24,
-                            node->add[pos] };
-                        cb_append(&code, text, sizeof(text));
-                    }
+                    gen_add(pos, node->add[pos]);
                 }
 
                 gen_move(node->value);
@@ -555,9 +581,7 @@ static void gen_code(AstNode *node)
                    from having an up-to-date zero flag: */
                 if (node->add[node->value] != 0)
                 {
-                    /* addb $<value>, (%rax) */
-                    const char text[] = { 0x80, 0x00, node->add[node->value] };
-                    cb_append(&code, text, sizeof(text));
+                    gen_add(0, node->add[node->value]);
                     zf_valid = 1;
                 }
                 else
@@ -615,7 +639,7 @@ static void gen_func(AstNode *ast)
 
     cb_append(&code, prologue, sizeof(prologue));
     gen_code(ast);
-    gen_bound_check();
+    check_head();
     cb_append(&code, epilogue, sizeof(epilogue));
 }
 
