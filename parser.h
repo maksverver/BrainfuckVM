@@ -22,8 +22,7 @@ typedef struct ParseResult {
    The returned result structure must be freed with free_parse_result(). If the
    result contains any errors, the resulting AST may be incomplete. */
 extern ParseResult *parse_string(const char *str, int debug);
-extern ParseResult *parse_path(const char *path, int debug);
-extern ParseResult *parse_file(FILE *fp, int debug);
+extern ParseResult *parse_file(FILE *fp, int debug, int separator);
 extern void parse_free_result(ParseResult *result);
 
 #endif /* ndef PARSER_H_INCLUDED */

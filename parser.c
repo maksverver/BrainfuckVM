@@ -7,6 +7,7 @@ typedef struct ParseState {
     FILE            *fp;        /* open file to read from if not NULL */
     const char      *buf;       /* string to read from if not NULL */
     int             debug;      /* debug character */
+    int             separator;  /* input separator */
     int             line;       /* current 0-based line */
     int             column;     /* current 0-based column */
     int             depth;      /* current nesting level */
@@ -63,9 +64,17 @@ static AstNode *parse(ParseState *ps)
     memset(&node, 0, sizeof(node));
     for (;;)
     {
-        if (ps->fp != NULL) c = getc(ps->fp);
-        else if (ps->buf != NULL && *ps->buf != '\0') c = *ps->buf++;
-        else c = EOF;
+        if (ps->fp != NULL) {
+            c = getc(ps->fp);
+            if (c == ps->separator) {
+                ungetc(c, ps->fp);
+                c = EOF;
+            }
+        } else if (ps->buf != NULL && *ps->buf != '\0') {
+            c = *ps->buf++;
+        } else {
+            c = EOF;
+        }
 
         ++ps->column;
 
@@ -170,36 +179,15 @@ static ParseResult *make_parse_result(
 ParseResult *parse_string(const char *str, int debug)
 {
     ParseMessage *warnings = NULL, *errors = NULL;
-    ParseState state = { NULL, str, debug, 0, 0, 0, &warnings, &errors };
+    ParseState state = { NULL, str, debug, -1, 0, 0, 0, &warnings, &errors };
     AstNode *ast = parse(&state);
     return make_parse_result(ast, warnings, errors);
 }
 
-ParseResult *parse_path(const char *path, int debug)
+ParseResult *parse_file(FILE *fp, int debug, int sep)
 {
     ParseMessage *warnings = NULL, *errors = NULL;
-    ParseState state = { NULL, NULL, debug, 0, 0, 0, &warnings, &errors };
-    AstNode *ast;
-
-    /* Try to open the specified file: */
-    if ((state.fp = fopen(path, "rt")) == NULL)
-    {
-        append_message(&state.errors, 0, 0, "failed to open input file");
-        ast = NULL;
-    }
-    else
-    {
-        ast = parse(&state);
-        fclose(state.fp);
-    }
-
-    return make_parse_result(ast, warnings, errors);
-}
-
-ParseResult *parse_file(FILE *fp, int debug)
-{
-    ParseMessage *warnings = NULL, *errors = NULL;
-    ParseState state = { fp, NULL, debug, 0, 0, 0, &warnings, &errors };
+    ParseState state = { fp, NULL, debug, sep, 0, 0, 0, &warnings, &errors };
     AstNode *ast = parse(&state);
     return make_parse_result(ast, warnings, errors);
 }
