@@ -59,23 +59,23 @@ static size_t find_offset()
     return 0;
 }
 
-static void range_check(Cell *cell, Cell **head)
+static void range_check(Cell **head)
 {
-    if (cell < tape)
+    while (*head < tape)
     {
         fprintf(stderr, "tape head exceeds left bound!\n");
         debug_break(head, program, find_offset());
     }
-    if (cell >= tape + tape_size)
+    if (*head >= tape + tape_size)
     {
-        assert(cell - (tape + tape_size) < pagesize);
+        assert(*head - (tape + tape_size) < pagesize);
         vm_expand(head);
     }
 }
 
 static Cell *vm_callback(Cell *head, int request)
 {
-    range_check(head, &head);
+    range_check(&head);
     switch (request)
     {
     case CB_READ:
@@ -102,44 +102,51 @@ static Cell *vm_callback(Cell *head, int request)
     return head;
 }
 
-static void sigsegv_handler(int signum, siginfo_t *info, void *ucontext_arg)
+static void signal_handler(int signum, siginfo_t *info, void *ucontext_arg)
 {
     ucontext_t *uc = (ucontext_t*)ucontext_arg;
     char *ip = (char*)uc->uc_mcontext.gregs[IP];
-    Cell *head = (Cell*)uc->uc_mcontext.gregs[HEAD];
+    Cell **head = (Cell**)&uc->uc_mcontext.gregs[HEAD];
 
-    if (signum != SIGSEGV) abort();
+    (void)info;  /* unused */
 
-    if (ip < code.data || ip >= code.data + code.size)
-    {   /* Segmentation fault occured outside of generated program code: */
-        fprintf(stderr, "segmentation fault occured!\n");
+    switch (signum)
+    {
+    case SIGSEGV:
+        if (ip < code.data || ip >= code.data + code.size)
+        {   /* Segmentation fault occured outside of generated program code: */
+            fprintf(stderr, "segmentation fault occured!\n");
+            abort();
+        }
+        /* Note that faulting addresss is at info->si_addr, which in optimized
+           code may be different from *head! */
+        break;
+
+    case SIGINT:
+        if (ip >= code.data && ip < code.data + code.size)
+        {   /* Interrupted generated code; call debugger immediately: */
+            debug_break(head, program, find_offset());
+            interrupted = 0;
+        }
+        else
+        {   /* Generated code not active; signal callback. */
+            interrupted = 1;
+        }
+        break;
+
+    default:
+        fprintf(stderr, "Unexpected signal received: %d\n", signum);
         abort();
     }
 
-    /* Range check on error address, update RAX and restart: */
-    range_check((Cell*)info->si_addr, &head);
-    uc->uc_mcontext.gregs[HEAD] = (greg_t)head;
-}
+    /* Ensure head is valid before continuing. */
+    range_check(head);
 
-static void sigint_handler(int signum, siginfo_t *info, void *ucontext_arg)
-{
-    ucontext_t *uc = (ucontext_t*)ucontext_arg;
-    char *ip = (char*)uc->uc_mcontext.gregs[IP];
-    Cell *head = (Cell*)uc->uc_mcontext.gregs[HEAD];
-
-    (void)info; /* unused */
-
-    if (signum != SIGINT) abort();
-
-    if (ip >= code.data && ip < code.data + code.size)
-    {   /* Interrupted generated code; call debugger immediately: */
-        debug_break(&head, program, find_offset());
-        uc->uc_mcontext.gregs[HEAD] = (greg_t)head;
-        interrupted = 0;
-    }
-    else
-    {   /* Generated code not active; signal callback. */
-        interrupted = 1;
+    /* Ensure zero flag corresponds to : */
+    if (*head) {
+        uc->uc_mcontext.gregs[REG_EFL] &= ~(1<<6);  /* clear zero flag */
+    } else {
+        uc->uc_mcontext.gregs[REG_EFL] |=   1<<6;     /* set zero flag */
     }
 }
 
@@ -339,7 +346,7 @@ static void gen_call(int request)
 #if __x86_64
         LONGPREFIX 0x89, 0xc7,         /* movq  %rax, %rdi */
         0xbe, (char)request, 0, 0, 0,  /* mov <request>, %esi */
-        0xff, 0xd3                     /* call *%ebx */
+        0xff, 0xd3                     /* call *%rbx */
 #elif __i386
         0x6a, (char)request,    /* push <request> */
         0x50,                   /* pushl %eax */
@@ -452,7 +459,7 @@ static int gen_special_loop_code(AstNode *child)
             if (bit > 0)
             {
                 static const char text[] = {
-                    LONGPREFIX 0x01, 0xc9 };   /* addb %cl, %cl */
+                    LONGPREFIX 0x01, 0xc9 };   /* add %rcx, %rcx */
                 cb_append(&code, text, sizeof(text));
             }
             for (pos = child->begin; pos < child->end; ++pos)
@@ -705,10 +712,9 @@ void vm_init(void)
     struct sigaction sigact;
 
     sigact.sa_flags = SA_SIGINFO;
-    sigact.sa_sigaction = &sigsegv_handler;
+    sigact.sa_sigaction = &signal_handler;
     sigemptyset(&sigact.sa_mask);
     sigaction(SIGSEGV, &sigact, &oldact_sigsegv);
-    sigact.sa_sigaction = &sigint_handler;
     sigaction(SIGINT, &sigact, &oldact_sigint);
 
     pagesize = getpagesize();

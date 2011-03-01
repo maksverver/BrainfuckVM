@@ -230,17 +230,17 @@ static void change_value(Cell **head, const char *cmd,
 
 void debug_write(Cell **head, const char *cmd)
 {
-    return change_value(head, cmd, "write", 0, 1);
+    change_value(head, cmd, "write", 0, 1);
 }
 
 void debug_add(Cell **head, const char *cmd)
 {
-    return change_value(head, cmd, "add", 1, 1);
+    change_value(head, cmd, "add", 1, 1);
 }
 
 void debug_subtract(Cell **head, const char *cmd)
 {
-    return change_value(head, cmd, "subtract", 1, -1);
+    change_value(head, cmd, "subtract", 1, -1);
 }
 
 #ifndef WITH_READLINE

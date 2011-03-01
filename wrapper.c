@@ -7,7 +7,7 @@
 
 extern char *bfmain(char *tape, char *(*callback)(char *, int));
 
-static char tape[1<<16];
+static char tape[1<<24];
 
 static char *callback(char *head, int request)
 {

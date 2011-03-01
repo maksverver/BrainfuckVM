@@ -14,7 +14,7 @@ static const char   *arg_source      = NULL;
 static int          arg_separator    = -1;
 static int          arg_optimize     = 0;
 static int          arg_wrap_check   = 0;
-static const char   *arg_object      = NULL;
+static int          arg_compile_only = 0;
 static int          arg_print_code   = 0;
 static int          arg_print_tree   = 0;
 static const char   *arg_input_path  = NULL;
@@ -37,7 +37,7 @@ static void exit_usage(void)
 "    -O         optimize\n"
 "    -w         wraparound detection\n"
 "Alternative output options:\n"
-"    -c <path>  compile to <path> (don't execute)\n"
+"    -c         compile object file (don't execute)\n"
 "    -p         print compact code (don't execute)\n"
 "    -t         print program tree (don't execute)\n"
 "Execution options:\n"
@@ -52,7 +52,7 @@ static size_t parse_size(const char *arg)
 {
     unsigned long long val;
     char suffix = '\0';
-    sscanf(arg, "%Lu%c", &val, &suffix);
+    sscanf(arg, "%llu%c", &val, &suffix);
     switch (suffix)
     {
     case 'G': case 'g': val *= 1024; /* falls through */
@@ -65,7 +65,7 @@ static size_t parse_size(const char *arg)
 static void parse_args(int argc, char *argv[])
 {
     int c;
-    while ((c = getopt(argc, argv, "d::e:s::Owc:pti:o:m:z:")) >= 0)
+    while ((c = getopt(argc, argv, "d::e:s::Owcpti:o:m:z:")) >= 0)
     {
         switch (c)
         {
@@ -74,7 +74,7 @@ static void parse_args(int argc, char *argv[])
         case 's': arg_separator = (optarg ? optarg[0] : '!')&255; break;
         case 'O': arg_optimize = 1; break;
         case 'w': arg_wrap_check = 1; break;
-        case 'c': arg_object = optarg; break;
+        case 'c': arg_compile_only = 1; break;
         case 'p': arg_print_code = 1; break;
         case 't': arg_print_tree = 1; break;
         case 'i': arg_input_path = optarg; break;
@@ -176,82 +176,82 @@ int main(int argc, char *argv[])
     parse_free_result(pr);
 
     /* Optimize program (if requested): */
-    if (arg_wrap_check) vm_set_wrap_check(arg_wrap_check);
     if (arg_optimize) ast = optimize(ast);
 
-    if (arg_print_code || arg_print_tree)
+
+    /* Initialize VM */
+    vm_init();
+    if (arg_wrap_check) vm_set_wrap_check(arg_wrap_check);
+
+    if (arg_print_code)
     {
-        if (arg_print_code)
-        {
-            /* Print program back: */
-            ast_print(ast, stdout, 80, arg_debug);
-        }
-        if (arg_print_tree)
-        {
-            /* Load code, then print annotated AST */
-            vm_init();
-            vm_load(ast);
-            ast_print_tree(ast, stdout);
-            vm_fini();
-        }
+        /* Print program back: */
+        ast_print(ast, stdout, 80, arg_debug);
     }
-    else
+
+    if (arg_print_tree)
     {
-        /* Execute program: */
-        vm_init();
+        /* Load code, then print annotated AST */
         vm_load(ast);
-        if (arg_object == NULL)
+        ast_print_tree(ast, stdout);
+        vm_fini();
+    }
+
+    if (arg_compile_only)
+    {
+        const char *path = arg_output_path != NULL ? arg_output_path : "a.out";
+        FILE *fp = fopen(path, "wb");
+
+        if (fp == NULL)
         {
-            FILE *fp_input = stdin, *fp_output = stdout;
-
-            if (fp_source != NULL)
-            {
-                fp_input = fp_source;
-                fp_source = NULL;
-            }
-
-            if (arg_mem_limit != (size_t)-1) vm_set_memlimit(arg_mem_limit);
-            if (arg_eof_value != -1) vm_set_eof_value(arg_eof_value);
-
-            if (arg_input_path != NULL &&
-                (fp_input = fopen(arg_input_path, "r")) == NULL)
-            {
-                fprintf(stderr, "Could not open input file `%s'!\n",
-                                arg_input_path);
-            }
-            else
-            if (arg_output_path != NULL &&
-                (fp_output = fopen(arg_output_path, "w")) == NULL)
-            {
-                fprintf(stderr, "Could not open output file `%s'!\n",
-                                arg_output_path);
-            }
-            else
-            {
-                vm_set_input(fp_input);
-                vm_set_output(fp_output);
-                vm_exec();
-            }
-            if (fp_input != stdin && fp_input != NULL) fclose(fp_input);
-            if (fp_output != stdout && fp_output != NULL) fclose(fp_output);
+            fprintf(stderr, "Could not open object file `%s'!\n", path);
         }
         else
         {
-            FILE *fp = fopen(arg_object, "wb");
-            if (fp == NULL)
-            {
-                fprintf(stderr, "Could not open object file `%s'!\n",
-                                arg_object);
-            }
-            else
-            {
-                vm_dump(fp);
-                fclose(fp);
-            }
+            vm_load(ast);
+            vm_dump(fp);
+            fclose(fp);
         }
-        vm_fini();
     }
+
+    if (!arg_print_code && !arg_print_tree && !arg_compile_only)
+    {
+        FILE *fp_input = stdin, *fp_output = stdout;
+
+        if (fp_source != NULL)
+        {
+            fp_input = fp_source;
+            fp_source = NULL;
+        }
+
+        if (arg_input_path != NULL &&
+            (fp_input = fopen(arg_input_path, "r")) == NULL)
+        {
+            fprintf(stderr, "Could not open input file `%s'!\n",
+                            arg_input_path);
+        }
+        else
+        if (arg_output_path != NULL &&
+            (fp_output = fopen(arg_output_path, "w")) == NULL)
+        {
+            fprintf(stderr, "Could not open output file `%s'!\n",
+                            arg_output_path);
+        }
+        else
+        {
+            if (arg_mem_limit != (size_t)-1) vm_set_memlimit(arg_mem_limit);
+            if (arg_eof_value != -1) vm_set_eof_value(arg_eof_value);
+            vm_load(ast);
+            vm_set_input(fp_input);
+            vm_set_output(fp_output);
+            vm_exec();
+        }
+        if (fp_input != stdin && fp_input != NULL) fclose(fp_input);
+        if (fp_output != stdout && fp_output != NULL) fclose(fp_output);
+    }
+
     if (fp_source != stdin && fp_source != NULL) fclose(fp_source);
+    vm_fini();
     ast_free(ast);
     return 0;
 }

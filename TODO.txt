@@ -1,17 +1,17 @@
- - support reading code + input separated by ! from a single file/stdin
+ - create benchmark suite; see e.g.
+    http://mazonka.com/brainf/
+    + welcome.bf
+    + my solution for GCJ
+    + my solution for FBHC
+    also check esolangs wiki
 
  - create test cases that cover all the possible optimizations and code
    generation scenario's.
 
  - clean up TODO/FIXMEs in the code
 
- - check for memory leaks
-
  - call into debugger on all errors (e.g. on allocation failure/memory limit
    exceeded) if possible
-
-
- - MAYBE: align branch targets?
 
  - MAYBE: separate code generation into:
     symbolic code generation (easy)
@@ -24,6 +24,3 @@ Debugger:
    (interpret '+x'/'-x' as head-relative offsets, and 'x' as absolute?)
  - extend writing functions to allow a range of memory to be filled
    (add an extra parameter that specifies an end position, or a length?)
-
-Long-term:
- - add profiling support to the VM (how?)

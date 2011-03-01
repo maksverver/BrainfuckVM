@@ -113,7 +113,7 @@ MOVE <x>:
 CALL <x>:
         movq %rax, %rdi
         movq x, %esi
-        call %*ebx
+        call *%rbx
 
 The code generator includes a peephole optimizer that tracks:
     1. whether the zero-flag is currently valid with respect to the current cell
@@ -126,5 +126,3 @@ the conditional jump (if the zero-status of the current cell is known).
 Furthermore, the VM uses an optimization pass that combines consecutive ADD
 and MOVE instructions into a single ADD_MOVE instruction. Special code is
 generated for LOOP-nodes with a single ADD_MOVE-node, and for ADD_MOVE-nodes.
-TODO: document!
-
