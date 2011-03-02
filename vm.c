@@ -118,6 +118,9 @@ static void signal_handler(int signum, siginfo_t *info, void *ucontext_arg)
             fprintf(stderr, "segmentation fault occured!\n");
             abort();
         }
+
+        if ((Cell*)info->si_addr >= tape + tape_size) vm_expand(head);
+
         /* Note that faulting addresss is at info->si_addr, which in optimized
            code may be different from *head! */
         break;
