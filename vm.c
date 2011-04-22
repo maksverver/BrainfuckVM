@@ -106,27 +106,29 @@ static void signal_handler(int signum, siginfo_t *info, void *ucontext_arg)
 {
     ucontext_t *uc = (ucontext_t*)ucontext_arg;
     char *ip = (char*)uc->uc_mcontext.gregs[IP];
-    Cell **head = (Cell**)&uc->uc_mcontext.gregs[HEAD];
+    Cell **head = (ip >= code.data && ip < code.data + code.size) ?
+                  (Cell**)&uc->uc_mcontext.gregs[HEAD] : NULL;
 
     (void)info;  /* unused */
 
     switch (signum)
     {
     case SIGSEGV:
-        if (ip < code.data || ip >= code.data + code.size)
+        if (head)
+        {
+            /* Note that faulting addresss is at info->si_addr, which (in
+               optimized code) may be different from *head! */
+            if ((Cell*)info->si_addr >= tape + tape_size) vm_expand(head);
+        }
+        else
         {   /* Segmentation fault occured outside of generated program code: */
             fprintf(stderr, "segmentation fault occured!\n");
             abort();
         }
-
-        if ((Cell*)info->si_addr >= tape + tape_size) vm_expand(head);
-
-        /* Note that faulting addresss is at info->si_addr, which in optimized
-           code may be different from *head! */
         break;
 
     case SIGINT:
-        if (ip >= code.data && ip < code.data + code.size)
+        if (head)
         {   /* Interrupted generated code; call debugger immediately: */
             debug_break(head, program, find_offset());
             interrupted = 0;
@@ -142,14 +144,16 @@ static void signal_handler(int signum, siginfo_t *info, void *ucontext_arg)
         abort();
     }
 
-    /* Ensure head is valid before continuing. */
-    range_check(head);
-
-    /* Ensure zero flag corresponds to : */
-    if (*head) {
-        uc->uc_mcontext.gregs[REG_EFL] &= ~(1<<6);  /* clear zero flag */
-    } else {
-        uc->uc_mcontext.gregs[REG_EFL] |=   1<<6;     /* set zero flag */
+    if (head)
+    {
+        /* Ensure head is valid before continuing. */
+        range_check(head);
+        /* Ensure zero flag corresponds to : */
+        if (*head) {
+            uc->uc_mcontext.gregs[REG_EFL] &= ~(1<<6);  /* clear zero flag */
+        } else {
+            uc->uc_mcontext.gregs[REG_EFL] |=   1<<6;     /* set zero flag */
+        }
     }
 }
 
@@ -719,7 +723,6 @@ void vm_init(void)
     sigemptyset(&sigact.sa_mask);
     sigaction(SIGSEGV, &sigact, &oldact_sigsegv);
     sigaction(SIGINT, &sigact, &oldact_sigint);
-
     pagesize = getpagesize();
     cb_create(&code);
     assert(CB_COUNT < 32);
