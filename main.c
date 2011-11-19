@@ -19,6 +19,7 @@ static int          arg_print_code   = 0;
 static int          arg_print_tree   = 0;
 static const char   *arg_input_path  = NULL;
 static const char   *arg_output_path = NULL;
+static int          arg_outbuf       = -1;
 static size_t       arg_mem_limit    = (size_t)-1;
 static int          arg_eof_value    = -1;
 static const char   *arg_source_path = "-";
@@ -43,6 +44,7 @@ static void exit_usage(void)
 "Execution options:\n"
 "    -i <path>  read input from file at <path> instead of standard input\n"
 "    -o <path>  write output to file at <path> instead of standard output\n"
+"    -b <mode>  output buffering mode ('none', 'line' or 'full')\n"
 "    -m <size>  tape memory limit (K, M or G suffix recognized)\n"
 "    -z <byte>  value stored when reading fails (default: none)\n" );
     exit(0);
@@ -62,10 +64,20 @@ static size_t parse_size(const char *arg)
     return (size_t)val;
 }
 
+static int parse_outbuf(const char *arg)
+{
+    if (strcmp(arg, "none") == 0) return _IONBF;
+    if (strcmp(arg, "line") == 0) return _IOLBF;
+    if (strcmp(arg, "full") == 0) return _IOFBF;
+    fprintf(stderr, "Invalid output buffering mode: '%s'\n\n", arg);
+    exit_usage();
+    return -1;
+}
+
 static void parse_args(int argc, char *argv[])
 {
     int c;
-    while ((c = getopt(argc, argv, "d::e:s::Owcpti:o:m:z:")) >= 0)
+    while ((c = getopt(argc, argv, "d::e:s::Owcpti:o:b:m:z:")) >= 0)
     {
         switch (c)
         {
@@ -79,6 +91,7 @@ static void parse_args(int argc, char *argv[])
         case 't': arg_print_tree = 1; break;
         case 'i': arg_input_path = optarg; break;
         case 'o': arg_output_path = optarg; break;
+        case 'b': arg_outbuf = parse_outbuf(optarg); break;
         case 'm': arg_mem_limit = parse_size(optarg); break;
         case 'z': arg_eof_value = atoi(optarg)&255; break;
         case '?':
@@ -239,6 +252,7 @@ int main(int argc, char *argv[])
         }
         else
         {
+            if (arg_outbuf != -1) setvbuf(fp_output, NULL, arg_outbuf, BUFSIZ);
             if (arg_mem_limit != (size_t)-1) vm_set_memlimit(arg_mem_limit);
             if (arg_eof_value != -1) vm_set_eof_value(arg_eof_value);
             vm_load(ast);
