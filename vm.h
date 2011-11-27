@@ -16,6 +16,7 @@ extern void vm_set_output(FILE *fp);
 extern void vm_set_memlimit(size_t size);
 extern void vm_set_eof_value(int val);
 extern void vm_set_wrap_check(int enable);
+extern void vm_set_profiling(int enable);
 extern void vm_exec(void);
 extern void vm_fini(void);
 extern void vm_dump(FILE *fp);
@@ -23,5 +24,8 @@ extern void vm_dump(FILE *fp);
 /* For the debugger interface: */
 extern void vm_expand(Cell **head);
 extern Cell *vm_memory(size_t *size);
+
+/* To print out profile info: */
+extern size_t *vm_get_profile(size_t *size);
 
 #endif /* ndef VM_H */

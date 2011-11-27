@@ -1,3 +1,6 @@
+ - DEBUG: valgrind --leak-check=full ./bfi ../brainfuck/programs/hello.bf
+    This reports memory leaks (even just with -t/-p).
+
  - create benchmark suite; see e.g.
     http://mazonka.com/brainf/
     + welcome.bf
@@ -17,6 +20,37 @@
     symbolic code generation (easy)
     peephole optimization (only if optimizations are enabled)
     bytecode generation (how to do this in a single pass?)
+
+Optimization/code generation:
+ - Idea: instead of always updating the register storing the tape head, keep
+         track of offset, and only update at the end of a while loop (unless
+         the while loop is perfectly balanced).
+
+   For example, code like this:
+
+     >>>[>+>[>]<<]
+
+   Currently translates to:
+
+     add 3 to head
+     while *head:
+       add 1 to head
+       add 1 to *head
+       add 1 to head
+       while *head:
+         add 1 to head
+       subtract 2 from head
+
+   But it could equivalently translate to:
+
+     while head[3]:
+       add 1 to head[4]
+         while head[5]:
+           add 1 to head
+
+   This eliminates updating of `head' (except once per iteration of each loop)
+   but it makes memory references more complex (requiring an offset) so it is
+   unclear whether this is actually much faster.  Should benchmark!
 
 Debugger:
  - functions to display/manipulate the current code position.

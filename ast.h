@@ -61,6 +61,6 @@ extern AstNode *ast_clone(AstNode *node);
 extern void ast_free(AstNode *node);
 
 /* Print the AST (for debugging purposes). */
-extern void ast_print_tree(const AstNode *root, FILE *fp);
+extern void ast_print_tree(const AstNode *root, size_t *samples, FILE *fp);
 
 #endif /* ndef AST_H_INCLUDED */

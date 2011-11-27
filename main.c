@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <getopt.h>
 
+/* Values for command line arguments */
 static int          arg_debug        = -1;
 static const char   *arg_source      = NULL;
 static int          arg_separator    = -1;
@@ -23,6 +24,11 @@ static int          arg_outbuf       = -1;
 static size_t       arg_mem_limit    = (size_t)-1;
 static int          arg_eof_value    = -1;
 static const char   *arg_source_path = "-";
+static int          arg_profile      = 0;
+
+/* Global state.  Freed at exit. */
+static FILE *fp_input, *fp_output, *fp_source;
+static AstNode *ast;
 
 static void exit_usage(void)
 {
@@ -46,7 +52,8 @@ static void exit_usage(void)
 "    -o <path>  write output to file at <path> instead of standard output\n"
 "    -b <mode>  output buffering mode ('none', 'line' or 'full')\n"
 "    -m <size>  tape memory limit (K, M or G suffix recognized)\n"
-"    -z <byte>  value stored when reading fails (default: none)\n" );
+"    -z <byte>  value stored when reading fails (default: none)\n"
+"    -P         enable sampling profiler (and print tree at exit)\n" );
     exit(0);
 }
 
@@ -77,7 +84,7 @@ static int parse_outbuf(const char *arg)
 static void parse_args(int argc, char *argv[])
 {
     int c;
-    while ((c = getopt(argc, argv, "d::e:s::Owcpti:o:b:m:z:")) >= 0)
+    while ((c = getopt(argc, argv, "d::e:s::Owcpti:o:b:m:z:P")) >= 0)
     {
         switch (c)
         {
@@ -94,6 +101,7 @@ static void parse_args(int argc, char *argv[])
         case 'b': arg_outbuf = parse_outbuf(optarg); break;
         case 'm': arg_mem_limit = parse_size(optarg); break;
         case 'z': arg_eof_value = atoi(optarg)&255; break;
+        case 'P': arg_profile = 1; break;
         case '?':
             /* getopt has already printed an error message */
             putc('\n', stderr);
@@ -119,10 +127,32 @@ static void parse_args(int argc, char *argv[])
     }
 }
 
+static void cleanup_vm()
+{
+    if (fp_source && fp_source != stdin)  fclose(fp_source);
+    if (fp_input  && fp_input  != stdin)  fclose(fp_input);
+    if (fp_output && fp_output != stdout) fclose(fp_output);
+
+    /* If profiling was enabled, try printing the sampled data now: */
+    if (arg_profile)
+    {
+        size_t i, size, *samples;
+
+        samples = vm_get_profile(&size);
+        if (samples != NULL && size > 0)
+        {
+            for (i = 0; i < size; ++i) samples[i + 1] += samples[i];
+            ast_print_tree(ast, samples, stdout);
+        }
+    }
+
+    vm_fini();
+    ast_free(ast);
+    ast = NULL;
+}
+
 int main(int argc, char *argv[])
 {
-    FILE *fp_source = NULL;
-    AstNode *ast;
     ParseResult *pr;
     ParseMessage *msg;
     int warnings = 0, errors = 0;
@@ -187,13 +217,14 @@ int main(int argc, char *argv[])
     ast = pr->ast;
     pr->ast = NULL;
     parse_free_result(pr);
+    pr = NULL;
 
     /* Optimize program (if requested): */
     if (arg_optimize) ast = optimize(ast);
 
-
     /* Initialize VM */
     vm_init();
+    atexit(cleanup_vm);
     if (arg_wrap_check) vm_set_wrap_check(arg_wrap_check);
 
     if (arg_print_code)
@@ -206,8 +237,7 @@ int main(int argc, char *argv[])
     {
         /* Load code, then print annotated AST */
         vm_load(ast);
-        ast_print_tree(ast, stdout);
-        vm_fini();
+        ast_print_tree(ast, NULL, stdout);
     }
 
     if (arg_compile_only)
@@ -229,7 +259,8 @@ int main(int argc, char *argv[])
 
     if (!arg_print_code && !arg_print_tree && !arg_compile_only)
     {
-        FILE *fp_input = stdin, *fp_output = stdout;
+        fp_input = stdin;
+        fp_output = stdout;
 
         if (fp_source != NULL)
         {
@@ -258,14 +289,10 @@ int main(int argc, char *argv[])
             vm_load(ast);
             vm_set_input(fp_input);
             vm_set_output(fp_output);
+            vm_set_profiling(arg_profile);
             vm_exec();
         }
-        if (fp_input != stdin && fp_input != NULL) fclose(fp_input);
-        if (fp_output != stdout && fp_output != NULL) fclose(fp_output);
     }
-
-    if (fp_source != stdin && fp_source != NULL) fclose(fp_source);
-    vm_fini();
-    ast_free(ast);
     return 0;
 }
+

@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <sys/ucontext.h>
 #include <sys/mman.h>
+#include <sys/time.h>
 
 #if __x86_64
 #define IP   REG_RIP
@@ -24,10 +25,16 @@
 #error "Could not determine target machine type."
 #endif
 
+static const struct itimerval timer_on  = { { 0, 1000 }, { 0, 1000 } };
+static const struct itimerval timer_off = { { 0,    0 }, { 0,    0 } };
+
 static AstNode *program;
 static int pagesize;
 static struct sigaction oldact_sigsegv;
 static struct sigaction oldact_sigint;
+static struct sigaction oldact_sigterm;
+static struct sigaction oldact_sigvtalrm;
+static size_t *profile;
 static int interrupted;
 static Cell *tape;
 static size_t tape_size;            /* in bytes */
@@ -59,12 +66,34 @@ static size_t find_offset()
     return 0;
 }
 
+static const AstNode *find_closest_node(const AstNode *node, size_t offset)
+{
+    while (node != NULL)
+    {
+        if (node->code.begin < offset && offset <= node->code.end)
+        {
+            const AstNode *result = find_closest_node(node->child, offset);
+            return result ? result : node;
+        }
+        node = node->next;
+    }
+    return NULL;
+}
+
+static void break_to_debugger(Cell **head)
+{
+    size_t offset = find_offset();
+    const AstNode *node = find_closest_node(program, offset);
+
+    debug_break(head, node, offset);
+}
+
 static void range_check(Cell **head)
 {
     while (*head < tape)
     {
         fprintf(stderr, "tape head exceeds left bound!\n");
-        debug_break(head, program, find_offset());
+        break_to_debugger(head);
     }
     if (*head >= tape + tape_size)
     {
@@ -91,12 +120,12 @@ static Cell *vm_callback(Cell *head, int request)
     case CB_WRAPPED:
         fprintf(stderr, "cell value wrapped around!\n");
     case CB_DEBUG:
-        debug_break(&head, program, find_offset());
+        break_to_debugger(&head);
         break;
     }
     if (interrupted)
     {
-        debug_break(&head, program, find_offset());
+        break_to_debugger(&head);
         interrupted = 0;
     }
     return head;
@@ -130,12 +159,25 @@ static void signal_handler(int signum, siginfo_t *info, void *ucontext_arg)
     case SIGINT:
         if (head)
         {   /* Interrupted generated code; call debugger immediately: */
-            debug_break(head, program, find_offset());
+            break_to_debugger(head);
             interrupted = 0;
         }
         else
         {   /* Generated code not active; signal callback. */
             interrupted = 1;
+        }
+        break;
+
+    case SIGTERM:
+        /* Causes atexit handlers to be called. */
+        exit(0);
+        break;
+
+    case SIGVTALRM:
+        {
+            assert(profile);
+            ++profile[find_offset()];
+            return;  /* optimization: return immediately */
         }
         break;
 
@@ -723,6 +765,8 @@ void vm_init(void)
     sigemptyset(&sigact.sa_mask);
     sigaction(SIGSEGV, &sigact, &oldact_sigsegv);
     sigaction(SIGINT, &sigact, &oldact_sigint);
+    sigaction(SIGTERM, &sigact, &oldact_sigterm);
+    sigaction(SIGVTALRM, &sigact, &oldact_sigvtalrm);
     pagesize = getpagesize();
     cb_create(&code);
     assert(CB_COUNT < 32);
@@ -773,19 +817,43 @@ void vm_set_wrap_check(int val)
     wrap_check = val;
 }
 
+void vm_set_profiling(int enable)
+{
+    assert(enable == 0 || enable == 1);
+    if (!profile && enable)
+    {
+        assert(program != NULL);
+        profile = calloc(code.size + 1, sizeof(size_t));
+        assert(profile != NULL);
+    }
+    else
+    if (profile && !enable)
+    {
+        free(profile);
+        profile = NULL;
+    }
+}
+
 void vm_exec(void)
 {
     Cell *head = tape;
+
     interrupted = 0;
+    setitimer(ITIMER_VIRTUAL, profile ? &timer_on : &timer_off, NULL);
     ((Cell *(*)(Cell*, VM_Callback))code.data)(head, &vm_callback);
+    setitimer(ITIMER_VIRTUAL, &timer_off, NULL);
 }
 
 void vm_fini(void)
 {
     sigaction(SIGSEGV, &oldact_sigsegv, NULL);
     sigaction(SIGINT, &oldact_sigint, NULL);
+    sigaction(SIGTERM, &oldact_sigterm, NULL);
+    sigaction(SIGVTALRM, &oldact_sigvtalrm, NULL);
+    vm_set_profiling(0);
     vm_free();
     cb_destroy(&code);
+    program = NULL;
 }
 
 void vm_dump(FILE *fp)
@@ -805,4 +873,10 @@ Cell *vm_memory(size_t *size)
 {
     if (size != NULL) *size = tape_size;
     return tape;
+}
+
+size_t *vm_get_profile(size_t *size)
+{
+    if (size) *size = code.size;
+    return profile;
 }

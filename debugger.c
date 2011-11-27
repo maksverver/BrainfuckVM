@@ -259,59 +259,41 @@ static void add_history(char*)
 }
 #endif
 
-const AstNode *find_closest_node(const AstNode *node, size_t offset)
-{
-    while (node != NULL)
-    {
-        if (node->code.begin < offset && offset <= node->code.end)
-        {
-            const AstNode *result = find_closest_node(node->child, offset);
-            return result ? result : node;
-        }
-        node = node->next;
-    }
-    return NULL;
-}
-
-void debug_break(Cell **head, const AstNode *program, size_t offset)
+void debug_break(Cell **head, const AstNode *node, size_t offset)
 {
     fflush(stdout);
-    if (program && offset)
+    if (node)
     {
-        const AstNode *node = find_closest_node(program, offset);
-        if (node != NULL)
+        SourceLocation begin = node->origin.begin, end = node->origin.end;
+
+        /* For loop nodes, we can determine which endpoint we hit: */
+        if (node->type == OP_LOOP && node->child)
         {
-            SourceLocation begin = node->origin.begin, end = node->origin.end;
+            if (node->child->code.begin >= offset) {
+                end = begin;
+            } else {
+                begin = end; 
+            }
+        }
 
-            /* For loop nodes, we can determine which endpoint we hit: */
-            if (node->type == OP_LOOP && node->child)
-            {
-                if (node->child->code.begin >= offset) {
-                    end = begin;
-                } else {
-                    begin = end; 
-                }
-            }
-
-            if (begin == end)
-            {
-                printf("Break at source line %d, column %d.\n",
-                       SRCLOC_LINE(begin), SRCLOC_COLUMN(begin) );
-            }
-            else
-            if (SRCLOC_LINE(begin) == SRCLOC_LINE(end))
-            {
-                printf("Break at source line %d, between column %d and %d.\n",
-                       SRCLOC_LINE(begin), SRCLOC_COLUMN(begin),
-                       SRCLOC_COLUMN(end) );
-            }
-            else
-            {
-                printf("Break between source line %d, column %d "
-                       "and line %d, column %d.\n",
-                       SRCLOC_LINE(begin), SRCLOC_COLUMN(begin),
-                       SRCLOC_LINE(end), SRCLOC_COLUMN(end) );
-            }
+        if (begin == end)
+        {
+            printf("Break at source line %d, column %d.\n",
+                    SRCLOC_LINE(begin), SRCLOC_COLUMN(begin) );
+        }
+        else
+        if (SRCLOC_LINE(begin) == SRCLOC_LINE(end))
+        {
+            printf("Break at source line %d, between column %d and %d.\n",
+                    SRCLOC_LINE(begin), SRCLOC_COLUMN(begin),
+                    SRCLOC_COLUMN(end) );
+        }
+        else
+        {
+            printf("Break between source line %d, column %d "
+                    "and line %d, column %d.\n",
+                    SRCLOC_LINE(begin), SRCLOC_COLUMN(begin),
+                    SRCLOC_LINE(end), SRCLOC_COLUMN(end) );
         }
     }
     while (cont == 0)

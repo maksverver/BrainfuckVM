@@ -208,4 +208,5 @@ void parse_free_result(ParseResult *result)
     ast_free(result->ast);
     free_messages(result->warnings);
     free_messages(result->errors);
+    free(result);
 }
