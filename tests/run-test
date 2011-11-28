@@ -1,0 +1,11 @@
+#!/bin/sh -e
+
+BFI=$(dirname "$0")/../bfi
+INPUT=${0%.sh}.in
+PROGRAM=${0%.sh}.b
+OUTPUT=${0%.sh}.out
+
+test -f "$INPUT" || INPUT=/dev/null
+
+$BFI    -i "$INPUT" "$PROGRAM" | diff -q - "$OUTPUT"
+$BFI -O -i "$INPUT" "$PROGRAM" | diff -q - "$OUTPUT"

@@ -9,9 +9,15 @@ bfi: $(OBJS)
 	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $^ $(LDLIBS)
 
 clean:
-	rm -f $(OBJS)
+	rm -f -- $(OBJS)
 
 distclean: clean
-	rm bfi
+	rm -f -- bfi
 
-.PHONY: all clean distclean
+test: tests/*.sh
+
+tests/*.sh: bfi
+	@"$@" && echo Test "$$(basename $@ .sh)" "passed." \
+	      || echo Test "$$(basename $@ .sh)" 'failed!'
+
+.PHONY: all clean distclean test tests/*.sh
