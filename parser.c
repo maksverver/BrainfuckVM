@@ -1,7 +1,8 @@
 #include "parser.h"
-#include <string.h>
-#include <stdlib.h>
 #include <assert.h>
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
 
 typedef struct ParseState {
     FILE            *fp;        /* open file to read from if not NULL */
@@ -35,7 +36,9 @@ static void emit(struct AstNode *temp, struct AstNode ***end,
 
     if (temp->type != OP_NONE)
     {
-        copy = ast_clone(temp);
+        size_t size = offsetof(AstNode, begin);
+        copy = malloc(size);
+        memcpy(copy, temp, size);
         **end = copy;
         *end = &copy->next;
     }

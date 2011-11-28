@@ -1,15 +1,14 @@
- - DEBUG: valgrind --leak-check=full ./bfi ../brainfuck/programs/hello.bf
-    This reports memory leaks (even just with -t/-p).
-
  - create benchmark suite; see e.g.
     http://mazonka.com/brainf/
     + welcome.bf
     + my solution for GCJ
     + my solution for FBHC
+    + "Life" with suitable input? (should at least be a test case)
     also check esolangs wiki
+    (maybe add cat with a large file as an I/O test?)
 
  - create test cases that cover all the possible optimizations and code
-   generation scenario's.
+   generation scenario's?
 
  - clean up TODO/FIXMEs in the code
 
