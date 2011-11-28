@@ -23,6 +23,15 @@ void cb_destroy(CodeBuf *cb)
     }
 }
 
+void cb_truncate(CodeBuf *cb)
+{
+    if (cb->size > 0)
+    {
+        cb->size = 0;
+        memset(cb->data, 0, cb->capacity);
+    }
+}
+
 /* Aligns the arguments to an integer multiple of the page size: */
 static size_t align(size_t size)
 {
@@ -86,21 +95,3 @@ void cb_insert(CodeBuf *cb, const void *buf, size_t len, size_t pos)
     cb_move(cb, pos, cb->size - pos, pos + len);
     memcpy(cb->data + pos, buf, len);
 }
-
-#if 0
-void cb_append_padding(CodeBuf *cb, int align)
-{
-    /* N.B. align must be a power of 2! */
-    int add = align - (cb->size&(align - 1));
-    if (cb->capacity < cb->size + add) reserve(cb, cb->size + add);
-    for (; add >= 4; add -= 4)
-    {
-        cb->data[cb->size++] = 0x66;
-        cb->data[cb->size++] = 0x66;
-        cb->data[cb->size++] = 0x66;
-        cb->data[cb->size++] = 0x90;
-    }
-    for (; add > 1; --add) cb->data[cb->size++] = 0x66;
-    if (add > 0) cb->data[cb->size++] = 0x90;
-}
-#endif
