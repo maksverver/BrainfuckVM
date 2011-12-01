@@ -16,10 +16,10 @@ import sys
 # Grab source code:
 for i in range(1, len(sys.argv)):
     if sys.argv[i] == '-e':
-        source = sys.argv[i + 1]
+        source = [sys.argv[i + 1]]
         break
     if sys.argv[i][:2] == '-e':
-        source = sys.argv[i][2:]
+        source = [sys.argv[i][2:]]
         break
 else:
     source = open(sys.argv[-1], 'rt').read().split('\n')
