@@ -1,12 +1,3 @@
- - create benchmark suite; see e.g.
-    http://mazonka.com/brainf/
-    + welcome.bf
-    + my solution for GCJ
-    + my solution for FBHC
-    + "Life" with suitable input? (should at least be a test case)
-    also check esolangs wiki
-    (maybe add cat with a large file as an I/O test?)
-
  - create test cases that cover all the possible optimizations and code
    generation scenario's?
 
@@ -14,6 +5,8 @@
 
  - call into debugger on all errors (e.g. on allocation failure/memory limit
    exceeded) if possible
+
+ - make debugger optional (just exit with failure status on errors)
 
  - MAYBE: separate code generation into:
     symbolic code generation (easy)
