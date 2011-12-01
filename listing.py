@@ -24,9 +24,18 @@ for i in range(1, len(sys.argv)):
 else:
     source = open(sys.argv[-1], 'rt').read().split('\n')
 
-# Generate object code in a.out, and grab tree code, using bfi:
-proc = subprocess.Popen( ["./bfi"] + sys.argv[1:] + ["-t", "-c", "-o", "a.out"],
-                         stdout=subprocess.PIPE )
+# Generate object code in a.out:
+res = subprocess.Popen( ["./bfi"] + sys.argv[1:] + ["-c"] ).wait()
+assert res == 0
+
+# Generate tree code, using bfi:
+options = sys.argv[1:]
+if not '-P' in options:
+    options += ["-t"]
+else:
+    options += ["-o", "/dev/null"]
+
+proc = subprocess.Popen( ["./bfi"] + options, stdout=subprocess.PIPE)
 data, _ = proc.communicate()
 assert proc.poll() is not None
 tree = []
@@ -69,6 +78,7 @@ for addr, line in code:
                 [source[r] for r in range(r1, r2 - 1)] + [source[r2 - 1][:c2]])
         print('\t' + desc)
         print('\t'*len(stack) + origin)
+        if stack[-1][5] <= addr: stack.pop()
     print('\t'*len(stack) + line)
 
 # Remove temporary object file
