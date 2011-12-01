@@ -22,10 +22,6 @@ echo "Welcome to Code Jam"
 time $CMD -i welcome.in welcome.b | diff -q - welcome.out
 echo
 
-echo "Snapper Chain"
-time $CMD -i snapper.in snapper.b | diff -q - snapper.out
-echo
-
 echo "Prime numbers"
 time $CMD -b line primes.b | head -5000 | diff -q - primes.out
 echo
