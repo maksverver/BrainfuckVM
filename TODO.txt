@@ -44,6 +44,9 @@ Optimization/code generation:
    but it makes memory references more complex (requiring an offset) so it is
    unclear whether this is actually much faster.  Should benchmark!
 
+ - try aligning jump targets to 4/8/16 byte boundaries and see if that
+   improves things?
+
 Debugger:
  - functions to display/manipulate the current code position.
  - function to write to memory at an absolute address.
