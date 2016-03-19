@@ -14,7 +14,7 @@ typedef struct CodeBuf
 
 void cb_create(CodeBuf *cb);
 void cb_destroy(CodeBuf *cb);
-#define cb_truncate(cb) do (cb)->capacity = 0; while(0)
+#define cb_truncate(cb) do (cb)->size = 0; while(0)
 void cb_reserve(CodeBuf *cb, size_t size);
 void cb_skip(CodeBuf *cb, size_t size);
 void cb_insert(CodeBuf *cb, const void *buf, size_t len, size_t pos);
