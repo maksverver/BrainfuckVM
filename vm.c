@@ -92,7 +92,7 @@ static void range_check(Cell **head)
 {
     while (*head < tape)
     {
-        fprintf(stderr, "tape head exceeds left bound!\n");
+        fprintf(stderr, "tape head exceeds left bound\n");
         break_to_debugger(head);
     }
     if (*head >= tape + tape_size)
@@ -118,7 +118,7 @@ static Cell *vm_callback(Cell *head, int request)
         break;
 
     case CB_WRAPPED:
-        fprintf(stderr, "cell value wrapped around!\n");
+        fprintf(stderr, "cell value wrapped around\n");
     case CB_DEBUG:
         break_to_debugger(&head);
         break;
@@ -144,14 +144,29 @@ static void signal_handler(int signum, siginfo_t *info, void *ucontext_arg)
     {
     case SIGSEGV:
         if (head)
-        {
-            /* Note that faulting addresss is at info->si_addr, which (in
+        {   /* Note that faulting addresss is at info->si_addr, which (in
                optimized code) may be different from *head! */
-            if ((Cell*)info->si_addr >= tape + tape_size) vm_expand(head);
+            Cell *addr = (Cell*)info->si_addr;
+            if (addr >= tape + tape_size)
+            {   /* Right bound exceeded. Try to expand memory. */
+                assert(addr - (tape + tape_size) < pagesize);
+                vm_expand(head);
+            }
+            else
+            if (addr < tape)
+            {   /* Left bound exceeded. Drop into debugger. */
+                fprintf(stderr, "memory access exceeds left bound\n");
+                break_to_debugger(head);
+            }
+            else
+            {   /* This should be impossible. */
+                fprintf(stderr, "segmentation fault within tape bounds\n");
+                abort();
+            }
         }
         else
-        {   /* Segmentation fault occured outside of generated program code: */
-            fprintf(stderr, "segmentation fault occured!\n");
+        {   /* Segmentation fault occurred outside of generated program code: */
+            fprintf(stderr, "segmentation fault occurred\n");
             abort();
         }
         break;
@@ -182,7 +197,7 @@ static void signal_handler(int signum, siginfo_t *info, void *ucontext_arg)
         break;
 
     default:
-        fprintf(stderr, "Unexpected signal received: %d\n", signum);
+        fprintf(stderr, "unexpected signal received: %d\n", signum);
         abort();
     }
 
