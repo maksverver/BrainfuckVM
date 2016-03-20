@@ -488,7 +488,7 @@ static void gen_add(int offset, int value)
    that adds a constant multiple of the current cell to the affected cells. */
 static int gen_special_loop_code(AstNode *child)
 {
-    int pos, num_bits = 0;
+    int pos, num_bits = 0, zero_check = 0;
 
     if (child == NULL || child->next != NULL ||   /* must be a single node */
         child->type != OP_ADD_MOVE ||             /* must be Add+Move node */
@@ -517,6 +517,10 @@ static int gen_special_loop_code(AstNode *child)
         static const char text[] = {
             LONGPREFIX 0x0f, 0xb6, 0x08 };  /* movzbq (%rax), %rcx */
         cb_append(&code, text, sizeof(text));
+
+        /* If we don't know that the current cell is nonzero, then we must do a zero-check here, to
+           avoid writing outside tape bounds in a loop which isn't actually executed. */
+        if (cell_value != 1) zero_check = code.size;
 
         for (bit = 0; bit < num_bits; ++bit)
         {
@@ -572,12 +576,35 @@ static int gen_special_loop_code(AstNode *child)
 
     /* Finally, clear current cell: */
     {
-        /* Alternatively, I could use andb $0, (%rax) to achieve the same result
-          while updating the zero-flag which may allow me to generate less code.
-          However, this is a slightly less efficient operation, and it is
-          unlikely this instruction will be followed by a test anyway. */
+        /* Alternatively, I could use andb $0, (%rax) to achieve the same result while updating the
+           zero-flag which may allow me to generate less code. However, this is a slightly less efficient
+           operation, and it is unlikely this instruction will be followed by a test anyway. */
         char text[] = { 0xc6, 0x00, 0x00 }; /* movb $0, (%rax) */
         cb_append(&code, text, sizeof(text));
+    }
+
+    if (zero_check > 0)
+    {   /* Possible FIXME: the main purpose of this check is to prevent writing outside of tape bounds
+           when the value to be copied is zero (see tests/bug-1.b for an example where this matters).
+           We could omit the check here and handle that case in the SIGSEGV signal handler instead, but
+           that's a bit messy. We need benchmarks to determine if it's worth optimizing. */
+        int dist = code.size - zero_check;
+        assert(dist > 0);
+        if (dist < 128)
+        {   /* Test and jump near */
+            const char text[] = {
+                0x84, 0xc9,    /* test %cl, %cl */
+                0x74, dist };  /* jz <dist> */
+            cb_insert(&code, text, sizeof(text), zero_check);
+        }
+        else
+        {   /* Test and jump far */
+            const char text[] = {
+                0x84, 0xc9,  /* test %cl, %cl */
+                0x0f, 0x84,  /* jz .. */
+                dist >> 0, dist >> 8, dist >> 16, dist >> 24 };
+            cb_insert(&code, text, sizeof(text), zero_check);
+        }
     }
 
     child->code.end = code.size;
