@@ -20,4 +20,10 @@ tests/*.sh: bfi
 	@"$@" && echo Test "$$(basename $@ .sh)" "passed." \
 	      || echo Test "$$(basename $@ .sh)" 'failed!'
 
-.PHONY: all clean distclean test tests/*.sh
+benchmark: benchmark/*.sh
+
+benchmark/*.sh: bfi
+	@echo "Running benchmark $$(basename $@ .sh)..."
+	@"$@" || echo 'Benchmark failed!'
+
+.PHONY: all clean distclean test tests/*.sh benchmark benchmark/*.sh

@@ -7,5 +7,5 @@ OUTPUT=${0%.sh}.out
 
 test -f "$INPUT" || INPUT=/dev/null
 
-$BFI    -i "$INPUT" "$PROGRAM" | diff -q - "$OUTPUT"
-$BFI -O -i "$INPUT" "$PROGRAM" | diff -q - "$OUTPUT"
+$BFI    -i "$INPUT" "$PROGRAM" </dev/null | diff -q - "$OUTPUT"
+$BFI -O -i "$INPUT" "$PROGRAM" </dev/null | diff -q - "$OUTPUT"

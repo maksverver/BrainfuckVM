@@ -92,7 +92,7 @@ static void range_check(Cell **head)
 {
     while (*head < tape)
     {
-        fprintf(stderr, "tape head exceeds left bound!\n");
+        fprintf(stderr, "tape head exceeds left bound\n");
         break_to_debugger(head);
     }
     if (*head >= tape + tape_size)
@@ -118,7 +118,7 @@ static Cell *vm_callback(Cell *head, int request)
         break;
 
     case CB_WRAPPED:
-        fprintf(stderr, "cell value wrapped around!\n");
+        fprintf(stderr, "cell value wrapped around\n");
     case CB_DEBUG:
         break_to_debugger(&head);
         break;
@@ -144,14 +144,29 @@ static void signal_handler(int signum, siginfo_t *info, void *ucontext_arg)
     {
     case SIGSEGV:
         if (head)
-        {
-            /* Note that faulting addresss is at info->si_addr, which (in
+        {   /* Note that faulting addresss is at info->si_addr, which (in
                optimized code) may be different from *head! */
-            if ((Cell*)info->si_addr >= tape + tape_size) vm_expand(head);
+            Cell *addr = (Cell*)info->si_addr;
+            if (addr >= tape + tape_size)
+            {   /* Right bound exceeded. Try to expand memory. */
+                assert(addr - (tape + tape_size) < pagesize);
+                vm_expand(head);
+            }
+            else
+            if (addr < tape)
+            {   /* Left bound exceeded. Drop into debugger. */
+                fprintf(stderr, "memory access exceeds left bound\n");
+                break_to_debugger(head);
+            }
+            else
+            {   /* This should be impossible. */
+                fprintf(stderr, "segmentation fault within tape bounds\n");
+                abort();
+            }
         }
         else
-        {   /* Segmentation fault occured outside of generated program code: */
-            fprintf(stderr, "segmentation fault occured!\n");
+        {   /* Segmentation fault occurred outside of generated program code: */
+            fprintf(stderr, "segmentation fault occurred\n");
             abort();
         }
         break;
@@ -182,7 +197,7 @@ static void signal_handler(int signum, siginfo_t *info, void *ucontext_arg)
         break;
 
     default:
-        fprintf(stderr, "Unexpected signal received: %d\n", signum);
+        fprintf(stderr, "unexpected signal received: %d\n", signum);
         abort();
     }
 
@@ -473,7 +488,7 @@ static void gen_add(int offset, int value)
    that adds a constant multiple of the current cell to the affected cells. */
 static int gen_special_loop_code(AstNode *child)
 {
-    int pos, num_bits = 0;
+    int pos, num_bits = 0, zero_check = 0;
 
     if (child == NULL || child->next != NULL ||   /* must be a single node */
         child->type != OP_ADD_MOVE ||             /* must be Add+Move node */
@@ -502,6 +517,10 @@ static int gen_special_loop_code(AstNode *child)
         static const char text[] = {
             LONGPREFIX 0x0f, 0xb6, 0x08 };  /* movzbq (%rax), %rcx */
         cb_append(&code, text, sizeof(text));
+
+        /* If we don't know that the current cell is nonzero, then we must do a zero-check here, to
+           avoid writing outside tape bounds in a loop which isn't actually executed. */
+        if (cell_value != 1) zero_check = code.size;
 
         for (bit = 0; bit < num_bits; ++bit)
         {
@@ -557,12 +576,35 @@ static int gen_special_loop_code(AstNode *child)
 
     /* Finally, clear current cell: */
     {
-        /* Alternatively, I could use andb $0, (%rax) to achieve the same result
-          while updating the zero-flag which may allow me to generate less code.
-          However, this is a slightly less efficient operation, and it is
-          unlikely this instruction will be followed by a test anyway. */
+        /* Alternatively, I could use andb $0, (%rax) to achieve the same result while updating the
+           zero-flag which may allow me to generate less code. However, this is a slightly less efficient
+           operation, and it is unlikely this instruction will be followed by a test anyway. */
         char text[] = { 0xc6, 0x00, 0x00 }; /* movb $0, (%rax) */
         cb_append(&code, text, sizeof(text));
+    }
+
+    if (zero_check > 0)
+    {   /* Possible FIXME: the main purpose of this check is to prevent writing outside of tape bounds
+           when the value to be copied is zero (see tests/bug-1.b for an example where this matters).
+           We could omit the check here and handle that case in the SIGSEGV signal handler instead, but
+           that's a bit messy. We need benchmarks to determine if it's worth optimizing. */
+        int dist = code.size - zero_check;
+        assert(dist > 0);
+        if (dist < 128)
+        {   /* Test and jump near */
+            const char text[] = {
+                0x84, 0xc9,    /* test %cl, %cl */
+                0x74, dist };  /* jz <dist> */
+            cb_insert(&code, text, sizeof(text), zero_check);
+        }
+        else
+        {   /* Test and jump far */
+            const char text[] = {
+                0x84, 0xc9,  /* test %cl, %cl */
+                0x0f, 0x84,  /* jz .. */
+                dist >> 0, dist >> 8, dist >> 16, dist >> 24 };
+            cb_insert(&code, text, sizeof(text), zero_check);
+        }
     }
 
     child->code.end = code.size;

@@ -1,17 +1,5 @@
-[
- Brainf**k adaptation of Welcome to Code Jam Problem
-
- Provided files:
-  Welcome.bf
-  bf2c.c
-
- To create output file c-small.out from c-small.in:
-  gcc -o bf2c bf2c.c
-  bf2c Welcome.bf Welcome.c
-  gcc -o Wel Welcome.c
-  download c-small.in
-  Wel 0<c-small.in 1>c-small.out
-]
+Problem C: Welcome to Code Jam
+Written by linguo for the 2009 Google Code Jam
 
 ++++++++++++++++
 Memory cell 0 = 16
@@ -46,7 +34,7 @@ Now Memory Cell 20 contains N and we are at Memory Cell 21
   If it is not, we put the character into char_obs of the first structure. 
   Then we do the following loop over the first 19 structures:
    Copy char_obs to the char_obs of the next structure
-   If char_exp /= char_obs, set char_obs = 0 and move to the next structure.
+   If char_exp != char_obs, set char_obs = 0 and move to the next structure.
    If char_exp = char_obs:
     add cnt0 and cnt1 from the next structure to cnt0 and cnt1 from this structure:
     if cnt1 >= 100, subtract 100 from cnt1 and add 1 to cnt0
