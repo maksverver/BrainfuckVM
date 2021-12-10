@@ -119,6 +119,7 @@ static Cell *vm_callback(Cell *head, int request)
 
     case CB_WRAPPED:
         fprintf(stderr, "cell value wrapped around\n");
+        // falls through
     case CB_DEBUG:
         break_to_debugger(&head);
         break;

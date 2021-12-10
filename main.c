@@ -30,6 +30,7 @@ static int          arg_profile      = 0;
 static FILE *fp_input, *fp_output, *fp_source;
 static AstNode *ast;
 
+__attribute__((__noreturn__))
 static void exit_usage(void)
 {
     printf(
