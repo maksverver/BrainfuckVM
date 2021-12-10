@@ -7,12 +7,14 @@ typedef Elf64_Shdr Shdr;
 typedef Elf64_Sym  Sym;
 #define ELFCLASS ELFCLASS64
 #define EM EM_X86_64
+#define ST_INFO ELF64_ST_INFO
 #elif __i386
 typedef Elf32_Ehdr Ehdr;
 typedef Elf32_Shdr Shdr;
 typedef Elf32_Sym  Sym;
 #define ELFCLASS ELFCLASS32
 #define EM EM_386
+#define ST_INFO ELF32_ST_INFO
 #else
 #error "Could not determine target machine type."
 #endif
@@ -22,11 +24,9 @@ void elf_dump(FILE *fp, void *code, size_t size)
     char str1_data[] = "\0.text\0.shstrtab\0.strtab\0.symtab";
     char str2_data[] = "\0bfmain\0";
 
-    Sym syms_data[3] = {
-        { 0, 0, 0, 0, 0, 0 },
-        { 0, ELF32_ST_INFO(STB_LOCAL, STT_SECTION), STV_DEFAULT, 1, 0, 0 },
-        { 1, ELF32_ST_INFO(STB_GLOBAL, STT_FUNC), STV_DEFAULT, 1,
-          0, size } };
+    Sym syms_data[2] = {
+        { 0, ST_INFO(STB_GLOBAL, STT_SECTION), STV_DEFAULT, 1, 0, 0 },
+        { 1, ST_INFO(STB_GLOBAL, STT_FUNC), STV_DEFAULT, 1, 0, size } };
 
     size_t text_pos = sizeof(Ehdr);
     size_t str1_pos = text_pos + size;
