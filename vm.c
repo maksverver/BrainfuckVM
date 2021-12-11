@@ -3,15 +3,16 @@
 #include "elf-dumper.h"
 #include "debugger.h"
 #include "codebuf.h"
+
+#include <assert.h>
 #include <execinfo.h>
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
-#include <assert.h>
-#include <unistd.h>
 #include <sys/ucontext.h>
 #include <sys/mman.h>
 #include <sys/time.h>
+#include <unistd.h>
 
 #if __x86_64
 #define IP   REG_RIP
@@ -54,7 +55,7 @@ static size_t find_offset()
     int n, naddr;
 
     /* Search for origin of error in generated code: */
-    naddr = backtrace(&addrs[0], sizeof(addrs)/sizeof(addrs[0]));
+    naddr = backtrace(addrs, sizeof(addrs)/sizeof(addrs[0]));
     for (n = 0; n < naddr; ++n)
     {
         if ((char*)addrs[n] > code.data &&
@@ -714,6 +715,15 @@ static void gen_func(AstNode *ast)
         LONGPREFIX 0x89, 0xe5,      /* movq %rsp, %rbp */
         0x53,                       /* pushq %rbx */
 #if __x86_64
+        /* The following instruction is superfluous, but it ensures 16-byte
+           alignment after a CALL instruction (which implicitly pushes another
+           8-byte return pointer on the stack). Without this, callbacks can
+           segfault if they use SSE instructions that require 16-byte alignment.
+
+           In theory, this affects IA-32 too, but I wasn't able to reproduce the
+           problem in 32-bit mode, so I'm only fixing it in 64-bit mode for now.
+        */
+        0x53,                       /* pushq %rbx: needed for 16-byte alignment! */
         LONGPREFIX 0x89, 0xf8,      /* movq %rdi, %rax */
         LONGPREFIX 0x89, 0xf3 };    /* movq %rsi, %rbx */
 #elif __i386
@@ -722,6 +732,10 @@ static void gen_func(AstNode *ast)
 #endif
 
     static const char epilogue[] = {
+#if __x86_64
+        /* Undoes the superfluous push mentioned above. */
+        0x5b,                   /* popq %rbx */
+#endif
         0x5b,                   /* popq %rbx */
         0x5d,                   /* popq %rbp */
         0xc3 };                 /* ret */
